@@ -1,7 +1,6 @@
 """
 Mock API - matches rulebook.md exactly.
-No real logic, no database. Returns canned data in the frozen shapes
-so Persons 1, 2 and 3 can build against it.
+No database. In-memory state, wiped on restart.
 
 Run:  uvicorn main:app --reload --host 0.0.0.0 --port 8000
 Docs: http://localhost:8000/docs
@@ -10,7 +9,7 @@ Docs: http://localhost:8000/docs
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import List
 
 app = FastAPI(title="Mock API")
 
@@ -21,57 +20,78 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# In-memory state. Wiped on restart. Replaced by MongoDB later.
-# ---------------------------------------------------------------------------
-
 TRIPS = {}
 
 
 def new_item(id, item, requester, rigidity, spec, reason, sub_rule, priority):
     return {
-        "id": id,
-        "item": item,
-        "requester": requester,
-        "rigidity": rigidity,
-        "spec": spec,
-        "reason": reason,
-        "substitute_rule": sub_rule,
-        "priority": priority,
-        "aisle": None,
-        "aisle_no": None,
+        "id": id, "item": item, "requester": requester, "rigidity": rigidity,
+        "spec": spec, "reason": reason, "substitute_rule": sub_rule,
+        "priority": priority, "aisle": None, "aisle_no": None,
     }
 
 
+# ---------------------------------------------------------------------------
+# Test products. These must match the physical objects on your shelf.
+#
+# Each one exists to exercise a different branch:
+#   i1 water bottle  - easy auto-accept, no drama
+#   i2 cheetos       - brand preference, warn branch
+#   i3 oreos         - price ceiling, pass branch
+#   i4 lego set      - price ceiling likely FAILS, over budget branch
+#   i5 rubber duck   - COLOR MISMATCH. spec says yellow, shelf has pink.
+#                      Nothing here hardcodes the colour check. The spec
+#                      just says "yellow". Real Muse vision has to look at
+#                      the photo and notice it is pink.
+#   i6 dish soap     - requester is None, so it is a SHARED item and gets
+#                      split evenly in settlement.
+# ---------------------------------------------------------------------------
+
 MOCK_ITEMS = [
-    new_item("i1", "oat milk", "Priya", "preferred",
-             "unsweetened, under $5",
-             "the sweet one made her coffee gross",
-             "any unsweetened oat brand ok, almond not ok", "must"),
-    new_item("i2", "pasta", "Arjun", "strict",
-             "not whole wheat",
-             "hated the whole wheat one last time",
-             "any regular semolina pasta", "must"),
-    new_item("i3", "greek yogurt", "Priya", "flexible",
-             "plain, large tub",
+    new_item("i1", "water bottle", "Priya", "flexible",
+             "any large bottle",
              None,
-             "any plain greek yogurt", "nice"),
-    new_item("i4", "coffee beans", "Arjun", "preferred",
-             "medium roast, whole bean",
-             "grinds his own",
-             "any medium roast whole bean", "must"),
-    new_item("i5", "dish soap", None, "flexible",
+             "any brand is fine", "must"),
+
+    new_item("i2", "cheetos", "Arjun", "preferred",
+             "crunchy, not puffs",
+             "he thinks the puffs are for children",
+             "any crunchy cheeto variant", "nice"),
+
+    new_item("i3", "oreos", "Priya", "flexible",
+             "original, under $5",
+             None,
+             "any oreo variety if original is gone", "nice"),
+
+    new_item("i4", "lego set", "Arjun", "preferred",
+             "small set, under $20, it's a gift",
+             "it's for his nephew's birthday on Saturday",
+             "any small set in that price range", "must"),
+
+    new_item("i5", "rubber duck", "Priya", "strict",
+             "yellow",
+             "it has to match the others she already has",
+             "no substitute, it must be yellow", "must"),
+
+    new_item("i6", "dish soap", None, "flexible",
              "whatever is cheapest",
              "shared household item",
              "any brand", "must"),
 ]
 
 AISLE_MAP = {
-    "i1": ("Dairy", 4),
-    "i2": ("Pantry", 6),
-    "i3": ("Dairy", 4),
-    "i4": ("Beverages", 3),
-    "i5": ("Household", 8),
+    "i1": ("Beverages", 2),
+    "i2": ("Snacks", 3),
+    "i3": ("Snacks", 3),
+    "i4": ("Toys", 5),
+    "i5": ("Toys", 5),
+    "i6": ("Household", 6),
+}
+
+# Rough prices so the budget moves realistically before real data exists.
+MOCK_PRICES = {
+    "i1": 2.49, "i2": 4.29, "i3": 4.79,
+    "i4": 17.99, "i5": 3.99, "i6": 3.49,
 }
 
 
@@ -140,15 +160,9 @@ def get_trip(trip_id):
             "trip_id": trip_id,
             "budget": 60.00,
             "lines": [
-                {
-                    "item_id": it["id"],
-                    "requester": it["requester"],
-                    "requested": it["item"],
-                    "product_name": None,
-                    "price": 0.0,
-                    "status": "pending",
-                    "note": "",
-                }
+                {"item_id": it["id"], "requester": it["requester"],
+                 "requested": it["item"], "product_name": None, "price": 0.0,
+                 "status": "pending", "note": ""}
                 for it in MOCK_ITEMS
             ],
         }
@@ -177,8 +191,12 @@ def set_line(trip_id, item_id, **fields):
     return cart_body(trip)
 
 
+def find_item(item_id):
+    return next((it for it in MOCK_ITEMS if it["id"] == item_id), None)
+
+
 # ---------------------------------------------------------------------------
-# 1. Chat parse
+# 1. Chat parse   (PERSON 2 replaces this body with the Muse Spark call)
 # ---------------------------------------------------------------------------
 
 @app.post("/api/chat/parse")
@@ -206,52 +224,75 @@ def trip_start(body: TripStartReq):
 def aisles(contract_id: str):
     grouped = {}
     for it in MOCK_ITEMS:
-        name, no = AISLE_MAP.get(it["id"], ("Pantry", 6))
+        name, no = AISLE_MAP.get(it["id"], ("Pantry", 9))
         filled = dict(it, aisle=name, aisle_no=no)
         grouped.setdefault(no, {"aisle": name, "aisle_no": no, "items": []})
         grouped[no]["items"].append(filled)
     return {"aisles": [grouped[k] for k in sorted(grouped)]}
 
 
-# ---------------------------------------------------------------------------
-# 4. Vision detect  (Person 2 replaces this with the real SAM 3.1 call)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# PERSON 2 SECTION. Replace these bodies. Do not change the shapes.
+# ===========================================================================
 
 @app.post("/api/vision/detect")
 def vision_detect(body: DetectReq):
-    boxes = [
-        [0.12, 0.30, 0.22, 0.48],
-        [0.38, 0.28, 0.20, 0.46],
-        [0.64, 0.32, 0.21, 0.44],
-    ]
-    return {
-        "detections": [
-            {"prompt": p, "bbox": boxes[i % len(boxes)], "confidence": 0.88}
-            for i, p in enumerate(body.prompts)
-        ]
-    }
+    """MOCK. Real version calls SAM 3.1 with the text prompts."""
+    boxes = [[0.10, 0.28, 0.20, 0.44],
+             [0.36, 0.26, 0.19, 0.46],
+             [0.62, 0.30, 0.21, 0.42]]
+    return {"detections": [
+        {"prompt": p, "bbox": boxes[i % len(boxes)], "confidence": 0.88}
+        for i, p in enumerate(body.prompts)
+    ]}
 
-
-# ---------------------------------------------------------------------------
-# 5. Product analyze  (Person 2 replaces with real Muse Spark call)
-# ---------------------------------------------------------------------------
 
 @app.post("/api/product/analyze")
 def product_analyze(body: AnalyzeReq):
+    """
+    MOCK. Builds a plausible checklist by splitting the item's spec on
+    commas. It CANNOT actually see the product, so it cannot tell a pink
+    duck from a yellow one - it just echoes the spec back as pass lines.
+
+    PERSON 2: the real version sends image_b64 plus the item's spec,
+    reason and substitute_rule to Muse Spark vision, and the model decides
+    each line. That is what catches the pink duck. Nothing about the
+    colour is hardcoded anywhere - the only colour information in the
+    system is the word "yellow" in the item's spec, which comes from the
+    group chat.
+    """
+    item = find_item(body.item_id)
+    if not item:
+        return {"match": False, "product_name": "Unknown", "price": 0.0,
+                "checklist": [{"status": "fail", "text": "item not in list"}],
+                "alternative": None}
+
+    price = MOCK_PRICES.get(body.item_id, 4.99)
+
+    checklist = [{"status": "pass", "text": f"looks like {item['item']}"}]
+    for part in (item.get("spec") or "").split(","):
+        part = part.strip()
+        if part:
+            checklist.append({"status": "pass", "text": part})
+    checklist.append({"status": "pass", "text": f"${price:.2f}"})
+
     return {
-        "match": False,
-        "product_name": "Chobani Oat Plain",
-        "price": 4.29,
-        "checklist": [
-            {"status": "pass", "text": "unsweetened"},
-            {"status": "pass", "text": "$4.29, under her $5"},
-            {"status": "fail", "text": "she didn't like this brand"},
-        ],
-        "alternative": {
-            "text": "Oatly next to it, $4.79, better match",
-            "bbox": [0.38, 0.28, 0.20, 0.46],
-        },
+        "match": True,
+        "product_name": item["item"].title(),
+        "price": price,
+        "checklist": checklist[:5],
+        "alternative": None,
     }
+
+
+@app.get("/api/preferences")
+def preferences(requester: str):
+    return {"requester": requester, "preferences": []}
+
+
+@app.post("/api/preferences/correction")
+def preferences_correction(body: CorrectionReq):
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
@@ -261,15 +302,15 @@ def product_analyze(body: AnalyzeReq):
 @app.post("/api/item/confirm")
 def item_confirm(body: ConfirmReq):
     return set_line(body.trip_id, body.item_id,
-                    product_name=body.product_name,
-                    price=body.price, status="purchased", note="")
+                    product_name=body.product_name, price=body.price,
+                    status="purchased", note="")
 
 
 @app.post("/api/item/substitute")
 def item_substitute(body: SubstituteReq):
     return set_line(body.trip_id, body.item_id,
-                    product_name=body.product_name,
-                    price=body.price, status="substituted", note=body.reason)
+                    product_name=body.product_name, price=body.price,
+                    status="substituted", note=body.reason)
 
 
 @app.post("/api/item/skip")
@@ -279,36 +320,23 @@ def item_skip(body: SkipReq):
                     status="skipped", note=body.reason)
 
 
-# ---------------------------------------------------------------------------
-# 9. Cart
-# ---------------------------------------------------------------------------
-
 @app.get("/api/cart")
 def cart(trip_id: str):
     return cart_body(get_trip(trip_id))
 
 
-# ---------------------------------------------------------------------------
-# 10. Checkout  (Person 3 replaces with real Visa call)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# PERSON 3 SECTION. Replace these bodies. Do not change the shapes.
+# ===========================================================================
 
 @app.post("/api/checkout")
 def checkout(body: CheckoutReq):
-    trip = get_trip(body.trip_id)
-    c = cart_body(trip)
+    c = cart_body(get_trip(body.trip_id))
     if c["over_budget"]:
         return {"ok": False, "error": "exceeds spend cap", "code": "CAP_EXCEEDED"}
-    return {
-        "ok": True,
-        "transaction_id": "vis_mock_abc123",
-        "total": c["spent"],
-        "mode": "mock",
-    }
+    return {"ok": True, "transaction_id": "vis_mock_abc123",
+            "total": c["spent"], "mode": "mock"}
 
-
-# ---------------------------------------------------------------------------
-# 11. Settlement  (Person 3 replaces with real split logic)
-# ---------------------------------------------------------------------------
 
 @app.get("/api/settlement")
 def settlement(trip_id: str):
@@ -325,16 +353,13 @@ def settlement(trip_id: str):
     per_person = []
     for name in names:
         mine = [l for l in bought if l["requester"] == name]
-        owes = round(sum(l["price"] for l in mine) + share_each, 2)
         per_person.append({
             "name": name,
-            "owes": owes,
-            "lines": (
-                [{"product_name": l["product_name"], "price": l["price"],
-                  "shared": False} for l in mine]
-                + [{"product_name": l["product_name"], "price": share_each,
-                    "shared": True} for l in shared]
-            ),
+            "owes": round(sum(l["price"] for l in mine) + share_each, 2),
+            "lines": [{"product_name": l["product_name"], "price": l["price"],
+                       "shared": False} for l in mine]
+                     + [{"product_name": l["product_name"], "price": share_each,
+                         "shared": True} for l in shared],
             "got": [l["product_name"] for l in mine if l["status"] == "purchased"],
             "substituted": [l["product_name"] for l in mine
                             if l["status"] == "substituted"],
@@ -346,32 +371,8 @@ def settlement(trip_id: str):
     card = f"${total:.2f} total\n" + "\n".join(
         f"{p['name']} owes ${p['owes']:.2f}" for p in per_person)
 
-    return {
-        "total": total,
-        "shared_total": shared_total,
-        "per_person": per_person,
-        "share_card_text": card,
-    }
-
-
-# ---------------------------------------------------------------------------
-# 12, 13. Preferences  (Person 2 replaces with Backboard)
-# ---------------------------------------------------------------------------
-
-@app.get("/api/preferences")
-def preferences(requester: str):
-    return {
-        "requester": requester,
-        "preferences": [
-            {"text": "dislikes Chobani oat", "source": "correction",
-             "trip_id": "t_000"}
-        ],
-    }
-
-
-@app.post("/api/preferences/correction")
-def preferences_correction(body: CorrectionReq):
-    return {"ok": True}
+    return {"total": total, "shared_total": shared_total,
+            "per_person": per_person, "share_card_text": card}
 
 
 @app.get("/api/health")
