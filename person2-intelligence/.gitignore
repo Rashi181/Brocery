@@ -1,0 +1,5 @@
+.env
+.prefs*.json
+__pycache__/
+.out/
+venv/

@@ -1,15 +1,16 @@
-# secrets
-backend/.env
-
-# python
-backend/venv/
+node_modules/
+dist/
+.venv/
+venv/
 __pycache__/
+.pytest_cache/
 *.pyc
-
-# node
-frontend/node_modules/
-frontend/dist/
-
-# os
-.DS_Store
-Thumbs.db
+.env
+.env.*
+!.env.example
+.prefs.json
+backend/data/
+work-*
+.test-deps/
+.npm-cache/
+.ruff_cache/

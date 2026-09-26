@@ -1,380 +1,464 @@
-"""
-Mock API - matches rulebook.md exactly.
-No database. In-memory state, wiped on restart.
-
-Run:  uvicorn main:app --reload --host 0.0.0.0 --port 8000
-Docs: http://localhost:8000/docs
+"""AccessCart: Supi's trip API + Meta intelligence + Alex camera client.
+Single-process MVP; contracts/trips are in memory, preferences persist locally.
 """
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List
+import os
+import json
+import sys
+import time
+import uuid
+from pathlib import Path
+from decimal import Decimal, ROUND_HALF_UP
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
-app = FastAPI(title="Mock API")
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(Path(__file__).with_name(".env"))
+os.environ.setdefault("LLM_MODE", "live")
+os.environ.setdefault("SAM_MODE", "live")
+os.environ.setdefault("LOCAL_PREF_PATH", str(ROOT / "backend/data/preferences.json"))
+sys.path.insert(0, str(ROOT / "person2-intelligence"))
+from intelligence import store
+from intelligence.router import router, get_llm, get_store, get_detector
+from intelligence.schemas import SpecItem, AnalyzeRequest, PreferenceFact
+from intelligence.contract import to_spec_response
+from intelligence.analyze import analyze_product
+from intelligence.vision import image_size, VisionError
+from intelligence.errors import install_error_handlers
+from intelligence.config import settings
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+app = FastAPI(title="AccessCart MVP", version="1.0")
+install_error_handlers(app)
 TRIPS = {}
+SCANS = {}
+ANALYSES = {}
 
-
-def new_item(id, item, requester, rigidity, spec, reason, sub_rule, priority):
-    return {
-        "id": id, "item": item, "requester": requester, "rigidity": rigidity,
-        "spec": spec, "reason": reason, "substitute_rule": sub_rule,
-        "priority": priority, "aisle": None, "aisle_no": None,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Test products. These must match the physical objects on your shelf.
-#
-# Each one exists to exercise a different branch:
-#   i1 water bottle  - easy auto-accept, no drama
-#   i2 cheetos       - brand preference, warn branch
-#   i3 oreos         - price ceiling, pass branch
-#   i4 lego set      - price ceiling likely FAILS, over budget branch
-#   i5 rubber duck   - COLOR MISMATCH. spec says yellow, shelf has pink.
-#                      Nothing here hardcodes the colour check. The spec
-#                      just says "yellow". Real Muse vision has to look at
-#                      the photo and notice it is pink.
-#   i6 dish soap     - requester is None, so it is a SHARED item and gets
-#                      split evenly in settlement.
-# ---------------------------------------------------------------------------
-
-MOCK_ITEMS = [
-    new_item("i1", "water bottle", "Priya", "flexible",
-             "any large bottle",
-             None,
-             "any brand is fine", "must"),
-
-    new_item("i2", "cheetos", "Arjun", "preferred",
-             "crunchy, not puffs",
-             "he thinks the puffs are for children",
-             "any crunchy cheeto variant", "nice"),
-
-    new_item("i3", "oreos", "Priya", "flexible",
-             "original, under $5",
-             None,
-             "any oreo variety if original is gone", "nice"),
-
-    new_item("i4", "lego set", "Arjun", "preferred",
-             "small set, under $20, it's a gift",
-             "it's for his nephew's birthday on Saturday",
-             "any small set in that price range", "must"),
-
-    new_item("i5", "rubber duck", "Priya", "strict",
-             "yellow",
-             "it has to match the others she already has",
-             "no substitute, it must be yellow", "must"),
-
-    new_item("i6", "dish soap", None, "flexible",
-             "whatever is cheapest",
-             "shared household item",
-             "any brand", "must"),
+# Supi's temporary catalog; category mapping is explicitly a demo store layout.
+CATALOG = [
+    (2, "Beverages", ["bottle", "water", "milk", "coffee", "juice"]),
+    (3, "Snacks", ["cheetos", "chips", "oreo", "cracker", "snack", "pasta"]),
+    (4, "Produce", ["banana", "apple", "fruit", "vegetable"]),
+    (5, "Toys", ["lego", "duck", "toy"]),
+    (6, "Household", ["soap", "detergent", "tissue"]),
 ]
 
-AISLE_MAP = {
-    "i1": ("Beverages", 2),
-    "i2": ("Snacks", 3),
-    "i3": ("Snacks", 3),
-    "i4": ("Toys", 5),
-    "i5": ("Toys", 5),
-    "i6": ("Household", 6),
-}
 
-# Rough prices so the budget moves realistically before real data exists.
-MOCK_PRICES = {
-    "i1": 2.49, "i2": 4.29, "i3": 4.79,
-    "i4": 17.99, "i5": 3.99, "i6": 3.49,
-}
+def cents(value):
+    return int(
+        (Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
 
 
-# ---------------------------------------------------------------------------
-# Request models
-# ---------------------------------------------------------------------------
-
-class ParseReq(BaseModel):
-    raw_text: str
+def trip_for(id):
+    if id not in TRIPS:
+        raise HTTPException(404, "Trip expired or not found. Import your list again.")
+    return TRIPS[id]
 
 
-class TripStartReq(BaseModel):
-    contract_id: str
-    budget: float
+def member_item(trip_id, item_id):
+    trip = trip_for(trip_id)
+    item = next((i for i in trip["items"] if i.id == item_id), None)
+    if item is None:
+        raise HTTPException(404, "This item is not in this trip")
+    return trip, item
 
 
-class DetectReq(BaseModel):
-    image_b64: str
-    prompts: List[str]
-
-
-class AnalyzeReq(BaseModel):
-    trip_id: str
-    item_id: str
-    image_b64: str
-
-
-class ConfirmReq(BaseModel):
-    trip_id: str
-    item_id: str
-    product_name: str
-    price: float
-
-
-class SubstituteReq(BaseModel):
-    trip_id: str
-    item_id: str
-    product_name: str
-    price: float
-    reason: str
-
-
-class SkipReq(BaseModel):
-    trip_id: str
-    item_id: str
-    reason: str
-
-
-class CheckoutReq(BaseModel):
-    trip_id: str
-
-
-class CorrectionReq(BaseModel):
-    trip_id: str
-    requester: str
-    text: str
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def get_trip(trip_id):
-    if trip_id not in TRIPS:
-        TRIPS[trip_id] = {
-            "trip_id": trip_id,
-            "budget": 60.00,
-            "lines": [
-                {"item_id": it["id"], "requester": it["requester"],
-                 "requested": it["item"], "product_name": None, "price": 0.0,
-                 "status": "pending", "note": ""}
-                for it in MOCK_ITEMS
-            ],
-        }
-    return TRIPS[trip_id]
-
-
-def cart_body(trip):
-    spent = round(sum(l["price"] for l in trip["lines"]
-                      if l["status"] in ("purchased", "substituted")), 2)
+def cart(trip):
+    spent = sum(l["amount_cents"] for l in trip["lines"].values())
     return {
-        "trip_id": trip["trip_id"],
-        "budget": trip["budget"],
-        "spent": spent,
-        "remaining": round(trip["budget"] - spent, 2),
-        "over_budget": spent > trip["budget"],
-        "lines": trip["lines"],
+        "trip_id": trip["id"],
+        "budget": trip["budget_cents"] / 100,
+        "spent": spent / 100,
+        "remaining": (trip["budget_cents"] - spent) / 100,
+        "over_budget": spent > trip["budget_cents"],
+        "lines": list(trip["lines"].values()),
     }
-
-
-def set_line(trip_id, item_id, **fields):
-    trip = get_trip(trip_id)
-    for line in trip["lines"]:
-        if line["item_id"] == item_id:
-            line.update(fields)
-            break
-    return cart_body(trip)
-
-
-def find_item(item_id):
-    return next((it for it in MOCK_ITEMS if it["id"] == item_id), None)
-
-
-# ---------------------------------------------------------------------------
-# 1. Chat parse   (PERSON 2 replaces this body with the Muse Spark call)
-# ---------------------------------------------------------------------------
-
-@app.post("/api/chat/parse")
-def chat_parse(body: ParseReq):
-    return {"contract_id": "c_001", "items": MOCK_ITEMS}
-
-
-# ---------------------------------------------------------------------------
-# 2. Trip start
-# ---------------------------------------------------------------------------
-
-@app.post("/api/trip/start")
-def trip_start(body: TripStartReq):
-    trip_id = f"t_{len(TRIPS) + 1:03d}"
-    trip = get_trip(trip_id)
-    trip["budget"] = body.budget
-    return {"trip_id": trip_id, "budget": body.budget}
-
-
-# ---------------------------------------------------------------------------
-# 3. Aisles
-# ---------------------------------------------------------------------------
-
-@app.get("/api/aisles")
-def aisles(contract_id: str):
-    grouped = {}
-    for it in MOCK_ITEMS:
-        name, no = AISLE_MAP.get(it["id"], ("Pantry", 9))
-        filled = dict(it, aisle=name, aisle_no=no)
-        grouped.setdefault(no, {"aisle": name, "aisle_no": no, "items": []})
-        grouped[no]["items"].append(filled)
-    return {"aisles": [grouped[k] for k in sorted(grouped)]}
-
-
-# ===========================================================================
-# PERSON 2 SECTION. Replace these bodies. Do not change the shapes.
-# ===========================================================================
-
-@app.post("/api/vision/detect")
-def vision_detect(body: DetectReq):
-    """MOCK. Real version calls SAM 3.1 with the text prompts."""
-    boxes = [[0.10, 0.28, 0.20, 0.44],
-             [0.36, 0.26, 0.19, 0.46],
-             [0.62, 0.30, 0.21, 0.42]]
-    return {"detections": [
-        {"prompt": p, "bbox": boxes[i % len(boxes)], "confidence": 0.88}
-        for i, p in enumerate(body.prompts)
-    ]}
-
-
-@app.post("/api/product/analyze")
-def product_analyze(body: AnalyzeReq):
-    """
-    MOCK. Builds a plausible checklist by splitting the item's spec on
-    commas. It CANNOT actually see the product, so it cannot tell a pink
-    duck from a yellow one - it just echoes the spec back as pass lines.
-
-    PERSON 2: the real version sends image_b64 plus the item's spec,
-    reason and substitute_rule to Muse Spark vision, and the model decides
-    each line. That is what catches the pink duck. Nothing about the
-    colour is hardcoded anywhere - the only colour information in the
-    system is the word "yellow" in the item's spec, which comes from the
-    group chat.
-    """
-    item = find_item(body.item_id)
-    if not item:
-        return {"match": False, "product_name": "Unknown", "price": 0.0,
-                "checklist": [{"status": "fail", "text": "item not in list"}],
-                "alternative": None}
-
-    price = MOCK_PRICES.get(body.item_id, 4.99)
-
-    checklist = [{"status": "pass", "text": f"looks like {item['item']}"}]
-    for part in (item.get("spec") or "").split(","):
-        part = part.strip()
-        if part:
-            checklist.append({"status": "pass", "text": part})
-    checklist.append({"status": "pass", "text": f"${price:.2f}"})
-
-    return {
-        "match": True,
-        "product_name": item["item"].title(),
-        "price": price,
-        "checklist": checklist[:5],
-        "alternative": None,
-    }
-
-
-@app.get("/api/preferences")
-def preferences(requester: str):
-    return {"requester": requester, "preferences": []}
-
-
-@app.post("/api/preferences/correction")
-def preferences_correction(body: CorrectionReq):
-    return {"ok": True}
-
-
-# ---------------------------------------------------------------------------
-# 6, 7, 8. Cart mutations
-# ---------------------------------------------------------------------------
-
-@app.post("/api/item/confirm")
-def item_confirm(body: ConfirmReq):
-    return set_line(body.trip_id, body.item_id,
-                    product_name=body.product_name, price=body.price,
-                    status="purchased", note="")
-
-
-@app.post("/api/item/substitute")
-def item_substitute(body: SubstituteReq):
-    return set_line(body.trip_id, body.item_id,
-                    product_name=body.product_name, price=body.price,
-                    status="substituted", note=body.reason)
-
-
-@app.post("/api/item/skip")
-def item_skip(body: SkipReq):
-    return set_line(body.trip_id, body.item_id,
-                    product_name=None, price=0.0,
-                    status="skipped", note=body.reason)
-
-
-@app.get("/api/cart")
-def cart(trip_id: str):
-    return cart_body(get_trip(trip_id))
-
-
-# ===========================================================================
-# PERSON 3 SECTION. Replace these bodies. Do not change the shapes.
-# ===========================================================================
-
-@app.post("/api/checkout")
-def checkout(body: CheckoutReq):
-    c = cart_body(get_trip(body.trip_id))
-    if c["over_budget"]:
-        return {"ok": False, "error": "exceeds spend cap", "code": "CAP_EXCEEDED"}
-    return {"ok": True, "transaction_id": "vis_mock_abc123",
-            "total": c["spent"], "mode": "mock"}
-
-
-@app.get("/api/settlement")
-def settlement(trip_id: str):
-    trip = get_trip(trip_id)
-    bought = [l for l in trip["lines"]
-              if l["status"] in ("purchased", "substituted")]
-
-    shared = [l for l in bought if not l["requester"]]
-    shared_total = round(sum(l["price"] for l in shared), 2)
-
-    names = sorted({l["requester"] for l in bought if l["requester"]})
-    share_each = round(shared_total / len(names), 2) if names else 0.0
-
-    per_person = []
-    for name in names:
-        mine = [l for l in bought if l["requester"] == name]
-        per_person.append({
-            "name": name,
-            "owes": round(sum(l["price"] for l in mine) + share_each, 2),
-            "lines": [{"product_name": l["product_name"], "price": l["price"],
-                       "shared": False} for l in mine]
-                     + [{"product_name": l["product_name"], "price": share_each,
-                         "shared": True} for l in shared],
-            "got": [l["product_name"] for l in mine if l["status"] == "purchased"],
-            "substituted": [l["product_name"] for l in mine
-                            if l["status"] == "substituted"],
-            "not_found": [l["requested"] for l in trip["lines"]
-                          if l["requester"] == name and l["status"] == "skipped"],
-        })
-
-    total = round(sum(l["price"] for l in bought), 2)
-    card = f"${total:.2f} total\n" + "\n".join(
-        f"{p['name']} owes ${p['owes']:.2f}" for p in per_person)
-
-    return {"total": total, "shared_total": shared_total,
-            "per_person": per_person, "share_card_text": card}
 
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    return {
+        "ok": True,
+        "llm_mode": settings.llm_mode,
+        "sam_mode": settings.sam_mode,
+        "key_configured": bool(settings.meta_api_key),
+        "catalog": "demo",
+        "storage": "session",
+        "preferences": type(get_store()).__name__,
+    }
+
+
+class Start(BaseModel):
+    contract_id: str
+    runner: str = Field(default="Runner", min_length=1, max_length=80)
+    budget: float = Field(ge=0, le=100000, allow_inf_nan=False)
+    items: list[SpecItem] = Field(min_length=1, max_length=100)
+
+
+@app.post("/api/trip/start")
+def start(body: Start):
+    contract = store.get_contract(body.contract_id)
+    if not contract:
+        raise HTTPException(404, "Import the chat again; this contract expired")
+    originals = {i.id: i for i in contract.items}
+    if len({i.id for i in body.items}) != len(body.items) or any(
+        i.id not in originals for i in body.items
+    ):
+        raise HTTPException(422, "Invalid or duplicate reviewed item")
+    items = []
+    for edit in body.items:
+        if not edit.item.strip() or not edit.requester.strip():
+            raise HTTPException(422, "Each item needs a product and requester")
+        updated = originals[edit.id].model_dump()
+        updated.update(
+            edit.model_dump(
+                include={
+                    "item",
+                    "requester",
+                    "rigidity",
+                    "avoid",
+                    "max_price",
+                    "quantity",
+                    "shared",
+                    "reason",
+                    "substitute_rule",
+                    "priority",
+                }
+            )
+        )
+        updated.update(
+            spec=[s.strip() for s in edit.spec.split(";") if s.strip()],
+            needs_review=False,
+            review_note=None,
+        )
+        items.append(type(originals[edit.id]).model_validate(updated))
+    # Store the reviewed version, not the initial extraction. Snapshot per trip.
+    contract = contract.model_copy(deep=True, update={"items": items})
+    contract.participants = list(
+        dict.fromkeys(contract.participants + [i.requester for i in items])
+    )
+    store.put_contract(contract)
+    id = "t_" + uuid.uuid4().hex
+    TRIPS[id] = {
+        "id": id,
+        "contract_id": contract.contract_id,
+        "items": [i.model_copy(deep=True) for i in items],
+        "runner": body.runner.strip(),
+        "participants": contract.participants,
+        "budget_cents": cents(body.budget),
+        "lines": {
+            i.id: {
+                "item_id": i.id,
+                "requested": i.item,
+                "requester": i.requester,
+                "shared": i.shared,
+                "quantity": i.quantity,
+                "status": "pending",
+                "product_name": None,
+                "price": None,
+                "amount_cents": 0,
+                "reason": "",
+                "verified": False,
+            }
+            for i in items
+        },
+    }
+    return {"trip_id": id, "budget": body.budget}
+
+
+@app.get("/api/aisles")
+def aisles(contract_id: str):
+    contract = store.get_contract(contract_id)
+    if not contract:
+        raise HTTPException(404, "Contract not found")
+    groups = {}
+    for item in to_spec_response(contract).items:
+        number, name = next(
+            (
+                (n, name)
+                for n, name, words in CATALOG
+                if any(w in item.item.lower() for w in words)
+            ),
+            (9, "Other"),
+        )
+        item.aisle, item.aisle_no = name, number
+        groups.setdefault(number, {"aisle_no": number, "aisle": name, "items": []})[
+            "items"
+        ].append(item)
+    return {"aisles": [groups[k] for k in sorted(groups)], "catalog": "demo"}
+
+
+class Scan(BaseModel):
+    trip_id: str
+    image_b64: str = Field(max_length=7_000_000)
+    prompts: list[str] = Field(min_length=1, max_length=6)
+
+
+@app.post("/api/vision/detect")
+async def detect(body: Scan):
+    trip_for(body.trip_id)
+    if any(not p.strip() or len(p) > 120 for p in body.prompts):
+        raise HTTPException(422, "Use 1–6 short product names")
+    try:
+        image_size(body.image_b64)
+        detections = await get_detector().detect(body.image_b64, body.prompts)
+    except VisionError as e:
+        raise HTTPException(502, str(e)) from None
+    for d in detections:
+        d.detection_id = d.detection_id or uuid.uuid4().hex
+    id = uuid.uuid4().hex
+    # Bound retained photos and expire them; never put images in logs or preferences.
+    now = time.monotonic()
+    for key in list(SCANS):
+        if now - SCANS[key]["time"] > 120:
+            SCANS.pop(key)
+    while len(SCANS) >= 8:
+        SCANS.pop(next(iter(SCANS)))
+    SCANS[id] = {
+        "trip_id": body.trip_id,
+        "time": now,
+        "image": body.image_b64,
+        "detections": detections,
+    }
+    return {"scan_id": id, "detections": detections}
+
+
+@app.post("/api/product/analyze")
+async def analyze(body: AnalyzeRequest):
+    _, item = member_item(body.trip_id, body.item_id)
+    try:
+        image_size(body.image_b64)
+    except VisionError as e:
+        raise HTTPException(422, str(e)) from None
+    scan = SCANS.get(body.scan_id)
+    if scan and (
+        scan["trip_id"] != body.trip_id or time.monotonic() - scan["time"] > 120
+    ):
+        scan = None
+    result = await analyze_product(
+        item,
+        body.image_b64,
+        llm=get_llm(),
+        pref_store=get_store(),
+        candidates=scan["detections"] if scan else None,
+        shelf_image=scan["image"] if scan else None,
+    )
+    result.analysis_id = uuid.uuid4().hex
+    ANALYSES[result.analysis_id] = (body.trip_id, body.item_id, result)
+    if len(ANALYSES) > 200:
+        ANALYSES.pop(next(iter(ANALYSES)))
+    return result
+
+
+class Action(BaseModel):
+    trip_id: str
+    item_id: str
+    product_name: str = Field(default="", max_length=200)
+    price: float | None = Field(default=None, ge=0, le=100000, allow_inf_nan=False)
+    unit_price: float | None = Field(default=None, ge=0, le=100000, allow_inf_nan=False)
+    reason: str = Field(default="", max_length=1000)
+    analysis_id: str | None = None
+    override: bool = False
+
+
+async def update_line(body, status):
+    trip, item = member_item(body.trip_id, body.item_id)
+    if trip.get("finished"):
+        raise HTTPException(409, "This run is complete. Start a new run to change it.")
+    found = ANALYSES.get(body.analysis_id)
+    result = found[2] if found and found[:2] == (body.trip_id, body.item_id) else None
+    if status != "skipped":
+        if body.price is None or not body.product_name.strip():
+            raise HTTPException(
+                422, "Confirm product name and total price for the requested quantity"
+            )
+        price_conflict = item.max_price is not None and (
+            body.unit_price is None or body.unit_price > item.max_price
+        )
+        identity_changed = bool(
+            result and body.product_name.strip() != result.product_name.strip()
+        )
+        if (
+            not result
+            or not result.match
+            or status == "substituted"
+            or price_conflict
+            or identity_changed
+        ) and not (body.override and body.reason.strip()):
+            raise HTTPException(
+                409, "This needs a recorded human decision before adding"
+            )
+    previous = trip["lines"][item.id]
+    line = {
+        **previous,
+        "status": status,
+        "product_name": body.product_name if status != "skipped" else None,
+        "price": body.price if status != "skipped" else None,
+        "amount_cents": cents(body.price) if status != "skipped" else 0,
+        "reason": body.reason,
+        "verified": bool(
+            result
+            and result.match
+            and not body.override
+            and body.product_name.strip() == result.product_name.strip()
+        ),
+        "checklist": [c.model_dump() for c in result.checklist] if result else [],
+    }
+    # Retry-safe: setting this line replaces it; it never adds the amount twice.
+    trip["lines"][item.id] = line
+    if body.override and body.reason and previous != line:
+        await get_store().add(
+            PreferenceFact(
+                requester=item.requester,
+                fact=body.reason,
+                item=item.item,
+                kind="override",
+                source="correction",
+                trip_id=body.trip_id,
+            )
+        )
+    return cart(trip)
+
+
+@app.post("/api/item/confirm")
+async def confirm(body: Action):
+    return await update_line(body, "purchased")
+
+
+@app.post("/api/item/substitute")
+async def substitute(body: Action):
+    return await update_line(body, "substituted")
+
+
+@app.post("/api/item/skip")
+async def skip(body: Action):
+    return await update_line(body, "skipped")
+
+
+class Undo(BaseModel):
+    trip_id: str
+    item_id: str
+
+
+@app.post("/api/item/undo")
+def undo(body: Undo):
+    trip, _ = member_item(body.trip_id, body.item_id)
+    if trip.get("finished"):
+        raise HTTPException(409, "This run is complete.")
+    trip["lines"][body.item_id].update(
+        status="pending",
+        amount_cents=0,
+        product_name=None,
+        price=None,
+        verified=False,
+        reason="",
+    )
+    return cart(trip)
+
+
+@app.get("/api/cart")
+def get_cart(trip_id: str):
+    return cart(trip_for(trip_id))
+
+
+@app.get("/api/settlement")
+def settlement(trip_id: str):
+    trip = trip_for(trip_id)
+    members = trip["participants"]
+    totals = {p: 0 for p in members}
+    purchased = [
+        l for l in trip["lines"].values() if l["status"] in ("purchased", "substituted")
+    ]
+    for line in purchased:
+        if line["shared"]:
+            quotient, remainder = divmod(line["amount_cents"], len(members))
+            for index, member in enumerate(members):
+                totals[member] += quotient + (index < remainder)
+        else:
+            totals[line["requester"]] += line["amount_cents"]
+    lines = list(trip["lines"].values())
+    exact = sum(l["verified"] and l["status"] == "purchased" for l in lines)
+    return {
+        "runner": trip["runner"],
+        "finished": trip.get("finished", False),
+        "total": sum(totals.values()) / 100,
+        "members": [{"name": p, "amount": n / 100} for p, n in totals.items()],
+        "accuracy": round(100 * exact / len(lines)) if lines else 0,
+        "verified": exact,
+        "requested": len(lines),
+        "pending": sum(l["status"] == "pending" for l in lines),
+        "lines": lines,
+        "score_rule": "Verified exact matches / all requested items; overrides, substitutions and skips earn no exact-match credit.",
+    }
+
+
+# Mount Meta endpoints after our trip-scoped detect/analyze adapters.
+# Omit overlapping unscoped routes; keep parsing, preference learning and health.
+for route in router.routes:
+    if route.path not in ("/vision/detect", "/product/analyze"):
+        from fastapi import APIRouter
+
+        group = APIRouter()
+        group.routes.append(route)
+        app.include_router(group, prefix="/api")
+
+
+HISTORY_PATH = ROOT / "backend/data/runs.json"
+
+
+def read_runs():
+    if not HISTORY_PATH.exists():
+        return []
+    return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+
+
+class Finish(BaseModel):
+    trip_id: str
+
+
+@app.post("/api/trip/finish")
+def finish(body: Finish):
+    trip = trip_for(body.trip_id)
+    summary = settlement(body.trip_id)
+    history = read_runs()
+    if not any(r["trip_id"] == body.trip_id for r in history):
+        history.append(
+            {
+                "trip_id": body.trip_id,
+                "runner": trip["runner"],
+                "verified": summary["verified"],
+                "requested": summary["requested"],
+            }
+        )
+        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        temp = HISTORY_PATH.with_suffix(".tmp")
+        temp.write_text(json.dumps(history[-500:]), encoding="utf-8")
+        temp.replace(HISTORY_PATH)
+    trip["finished"] = True
+    return settlement(body.trip_id)
+
+
+@app.get("/api/leaderboard")
+def leaderboard():
+    grouped = {}
+    for run in read_runs():
+        row = grouped.setdefault(
+            run["runner"],
+            {"name": run["runner"], "verified": 0, "requested": 0, "runs": 0},
+        )
+        row["verified"] += run["verified"]
+        row["requested"] += run["requested"]
+        row["runs"] += 1
+    rows = [
+        {
+            **r,
+            "accuracy": round(100 * r["verified"] / r["requested"])
+            if r["requested"]
+            else 0,
+        }
+        for r in grouped.values()
+    ]
+    return {
+        "runners": sorted(rows, key=lambda r: (-r["accuracy"], -r["runs"], r["name"]))
+    }

@@ -1,9 +1,10 @@
 // Every network call in the app goes through this file.
 
-const BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
+const BASE = import.meta.env.VITE_API_BASE || "/api";
 
 async function req(path, options = {}) {
   const res = await fetch(BASE + path, {
+    signal: AbortSignal.timeout(210000),
     headers: { "Content-Type": "application/json" },
     ...options,
   });
@@ -12,8 +13,12 @@ async function req(path, options = {}) {
     try {
       const body = await res.json();
       detail = body.error || body.detail || detail;
-    } catch {}
-    throw new Error(detail);
+    } catch {
+      /* retain HTTP error */
+    }
+    throw new Error(
+      typeof detail === "string" ? detail : "Check the fields and try again.",
+    );
   }
   return res.json();
 }
@@ -24,32 +29,42 @@ const post = (path, body) =>
 
 export const api = {
   health: () => get("/health"),
+  finish: (trip_id) => post("/trip/finish", { trip_id }),
+  leaderboard: () => get("/leaderboard"),
 
   parseChat: (raw_text) => post("/chat/parse", { raw_text }),
 
-  startTrip: (contract_id, budget) =>
-    post("/trip/start", { contract_id, budget }),
+  startTrip: (contract_id, budget, items, runner) =>
+    post("/trip/start", { contract_id, budget, items, runner }),
 
   getAisles: (contract_id) =>
     get(`/aisles?contract_id=${encodeURIComponent(contract_id)}`),
 
-  detect: (image_b64, prompts) => post("/vision/detect", { image_b64, prompts }),
+  detect: (trip_id, image_b64, prompts) =>
+    post("/vision/detect", { trip_id, image_b64, prompts }),
 
-  analyze: (trip_id, item_id, image_b64) =>
-    post("/product/analyze", { trip_id, item_id, image_b64 }),
+  analyze: (trip_id, item_id, image_b64, scan_id) =>
+    post("/product/analyze", { trip_id, item_id, image_b64, scan_id }),
 
-  confirmItem: (trip_id, item_id, product_name, price) =>
-    post("/item/confirm", { trip_id, item_id, product_name, price }),
+  confirmItem: (trip_id, item_id, product_name, price, extra = {}) =>
+    post("/item/confirm", { trip_id, item_id, product_name, price, ...extra }),
 
-  substituteItem: (trip_id, item_id, product_name, price, reason) =>
-    post("/item/substitute", { trip_id, item_id, product_name, price, reason }),
+  substituteItem: (trip_id, item_id, product_name, price, reason, extra = {}) =>
+    post("/item/substitute", {
+      trip_id,
+      item_id,
+      product_name,
+      price,
+      reason,
+      ...extra,
+    }),
 
   skipItem: (trip_id, item_id, reason) =>
     post("/item/skip", { trip_id, item_id, reason }),
 
   getCart: (trip_id) => get(`/cart?trip_id=${encodeURIComponent(trip_id)}`),
 
-  checkout: (trip_id) => post("/checkout", { trip_id }),
+  undo: (trip_id, item_id) => post("/item/undo", { trip_id, item_id }),
 
   getSettlement: (trip_id) =>
     get(`/settlement?trip_id=${encodeURIComponent(trip_id)}`),
