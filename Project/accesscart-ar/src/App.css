@@ -1,0 +1,166 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+body {
+  background: #111;
+}
+
+.xr-scene {
+  position: fixed;
+  inset: 0;
+}
+
+.xr-scene canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.xr-overlay {
+  position: fixed;
+  inset: 0;
+
+  pointer-events: none;
+
+  z-index: 10;
+}
+
+.top-card {
+  position: absolute;
+
+  top: 20px;
+  left: 50%;
+
+  transform: translateX(-50%);
+
+  width: min(
+    calc(100% - 32px),
+    440px
+  );
+
+  padding: 14px 16px;
+
+  border-radius: 18px;
+
+  background:
+    rgba(15, 15, 18, 0.82);
+
+  color: white;
+
+  backdrop-filter: blur(15px);
+
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.13);
+}
+
+.brand {
+  font-size: 13px;
+  font-weight: 800;
+
+  letter-spacing: 0.18em;
+
+  color: #7cffb2;
+}
+
+.status {
+  margin-top: 6px;
+
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.place-button {
+  pointer-events: auto;
+
+  width: 100%;
+
+  margin-top: 12px;
+
+  padding: 14px 16px;
+
+  border: none;
+  border-radius: 14px;
+
+  font-size: 15px;
+  font-weight: 800;
+
+  color: #101312;
+  background: #7cffb2;
+}
+/* Shopping scan, photo review, and compact AR controls. */
+.top-card {
+  top: max(16px, env(safe-area-inset-top));
+  max-height: calc(100dvh - 100px - env(safe-area-inset-top));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+.capture-button, .place-button {
+  pointer-events: auto;
+  width: 100%;
+  margin-top: 10px;
+  padding: 14px 16px;
+  min-height: 44px;
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 14px;
+  background: rgba(255,255,255,.12);
+  color: white;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.capture-button:disabled, .place-button:disabled { opacity: .45; cursor: not-allowed; }
+.capture-status { margin-top: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.snapshot-container { margin-top: 12px; }
+.snapshot-title { margin-bottom: 6px; font-size: 10px; font-weight: 700; letter-spacing: .12em; color: #7cffb2; }
+.snapshot { display: block; width: 100%; max-height: 220px; object-fit: contain; border-radius: 12px; background: black; }
+.segment-label { display: block; margin-top: 14px; font-size: 13px; }
+.segment-input { box-sizing: border-box; width: 100%; margin-top: 6px; padding: 10px; border-radius: 8px; border: 1px solid #777; background: #222; color: white; font-size: 16px; }
+.segmentation-preview { position: relative; margin-top: 12px; }
+.segmentation-preview img { display: block; width: 100%; border-radius: 10px; }
+.segmentation-preview .segmentation-overlay { position: absolute; inset: 0; height: 100%; }
+.chat-import { margin: 12px 0; font-size: 13px; text-align: left; }
+.chat-import summary { cursor: pointer; padding: 8px 0; color: #7cffb2; }
+.chat-import input[type=file] { width: 100%; }
+.chat-item { margin: 12px 0; padding: 12px; border: 1px solid #555; border-radius: 10px; overflow-wrap: anywhere; }
+.chat-item blockquote { margin: 8px 0; padding-left: 8px; border-left: 2px solid #7cffb2; }
+.chat-json { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.compact-card { padding: 10px 14px; background: rgba(18,18,22,.78); }
+.compact-card .brand { font-size: 11px; }
+.camera-target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 6px; font-size: 14px; }
+.camera-actions { display: flex; gap: 8px; }
+.camera-actions .capture-button { margin-top: 8px; padding: 10px; font-size: 12px; }
+.camera-hint { margin-top: 6px; font-size: 11px; line-height: 1.35; }
+#camera-details[hidden] { display: none; }
+
+.scan-camera { position: fixed; inset: 0; z-index: 10000; background: #111; color: white; overflow-y: auto; padding: max(12px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)); }
+.scan-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.scan-header button { width: auto; margin: 0; }
+.scan-preview { position: relative; height: 52dvh; background: black; }
+.scan-preview video { width: 100%; height: 100%; object-fit: contain; }
+.scan-photo { width: 100%; max-height: 52dvh; object-fit: contain; }
+.focus-ring { position: absolute; width: 48px; height: 48px; border: 2px solid #7cffb2; border-radius: 8px; transform: translate(-50%, -50%); pointer-events: none; }
+.scan-preview[hidden], .xr-overlay[hidden] { display: none; }
+
+.restriction-check { margin: 10px 0; padding: 12px; border: 1px solid #888; border-radius: 10px; font-size: 13px; }
+.restriction-conflict { border-color: #ff8d8d; background: #51262d; }
+.restriction-possible { border-color: #ffd285; background: #453a25; }
+.restriction-check blockquote { margin: 8px 0; padding-left: 8px; border-left: 2px solid currentColor; }

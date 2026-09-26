@@ -1,0 +1,6 @@
+fastapi==0.141.1
+uvicorn==0.54.0
+Pillow==12.3.0
+httpx==0.28.1
+python-dotenv==1.2.3
+meta-sam-parser==0.0.6
