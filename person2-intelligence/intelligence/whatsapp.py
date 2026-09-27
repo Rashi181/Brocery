@@ -28,6 +28,24 @@ MEDIA = re.compile(
     re.I,
 )
 
+# This is deliberately a high-recall *routing* filter, not a shopping
+# classifier. Muse still decides what is actually being requested.  The goal
+# is only to avoid paying to send unrelated conversation to the model while
+# retaining enough neighbouring turns to understand "actually", "same one",
+# and other short corrections.
+_SHOPPING_SIGNAL = re.compile(
+    r"\b(?:get|buy|grab|pick\s*up|need(?:s)?|want(?:s)?|order|shop(?:ping)?|"
+    r"grocery|groceries|cart|gift|gifts|present|presents|budget|price|cost|"
+    r"sale|coupon|brand|size|allerg(?:y|ies)|vegan|vegetarian|gluten|dairy|"
+    r"unsweetened|sugar[- ]free|caffeine[- ]free|halal|kosher)\b|[$₹€£]",
+    re.I,
+)
+_CORRECTION_SIGNAL = re.compile(
+    r"\b(?:actually|instead|rather|same|only|except|without|not|no|don't|"
+    r"dont|never\s+mind|change(?:d)?|cancel|different|any\s+brand)\b",
+    re.I,
+)
+
 
 class ChatParseError(ValueError):
     pass
@@ -132,6 +150,48 @@ def participants(messages: list[ChatMessage]) -> list[str]:
         if m.sender and not m.is_system:
             seen.setdefault(m.sender, None)
     return list(seen)
+
+
+def select_relevant_windows(
+    messages: list[ChatMessage],
+    *,
+    before: int = 2,
+    after: int = 3,
+    correction_radius: int = 8,
+) -> list[ChatMessage]:
+    """Return likely shopping discussion plus the context required to interpret it.
+
+    No model is used here.  First we identify explicit shopping signals, then
+    include short correction messages only when they occur close to one of
+    those signals.  Finally each seed gets a small chronological window.  This
+    avoids an isolated "no" from unrelated conversation pulling in a whole
+    transcript, but keeps replies such as "actually, unsweetened only".
+
+    If no shopping signal exists, return the non-system messages unchanged.
+    That safe fallback lets Muse report an empty contract instead of silently
+    hiding a request phrased in an unforeseen way.
+    """
+    if before < 0 or after < 0 or correction_radius < 0:
+        raise ValueError("window sizes must be non-negative")
+
+    usable = [
+        m for m in messages if not m.is_system and not m.is_media and m.text.strip()
+    ]
+    primary = [i for i, m in enumerate(usable) if _SHOPPING_SIGNAL.search(m.text)]
+    if not primary:
+        return [m for m in messages if not m.is_system]
+
+    seeds = set(primary)
+    for i, m in enumerate(usable):
+        if _CORRECTION_SIGNAL.search(m.text) and any(
+            abs(i - p) <= correction_radius for p in primary
+        ):
+            seeds.add(i)
+
+    chosen: set[int] = set()
+    for i in seeds:
+        chosen.update(range(max(0, i - before), min(len(usable), i + after + 1)))
+    return [m for i, m in enumerate(usable) if i in chosen]
 
 
 def render_for_llm(messages: list[ChatMessage]) -> str:

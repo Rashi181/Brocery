@@ -6,6 +6,7 @@ from intelligence.whatsapp import (
     parse_whatsapp,
     recent_window,
     render_for_llm,
+    select_relevant_windows,
 )
 
 
@@ -62,3 +63,30 @@ def test_not_whatsapp_raises():
 def test_window_keeps_recent_only():
     raw = "1/1/26, 10:00 AM - Ana: old\n2/1/26, 10:00 AM - Ana: new\n"
     assert [m.text for m in recent_window(parse_whatsapp(raw), days=7)] == ["new"]
+
+
+def test_relevance_windows_keep_request_and_short_correction_without_noise():
+    raw = (
+        "9/24/26, 8:00 PM - Ana: did you see that video?\n"
+        "9/24/26, 8:01 PM - Ben: lol\n"
+        "9/24/26, 8:02 PM - Ana: Please get oat milk tomorrow\n"
+        "9/24/26, 8:03 PM - Ana: Actually unsweetened only\n"
+        "9/24/26, 8:04 PM - Ben: any brand?\n"
+        "9/24/26, 8:05 PM - Ana: yes, but not almond\n"
+        "9/24/26, 8:06 PM - Ben: see you later\n"
+        "9/24/26, 8:07 PM - Ben: another unrelated message\n"
+    )
+    selected = select_relevant_windows(
+        parse_whatsapp(raw), before=0, after=0, correction_radius=4
+    )
+    assert [m.text for m in selected] == [
+        "Please get oat milk tomorrow",
+        "Actually unsweetened only",
+        "any brand?",
+        "yes, but not almond",
+    ]
+
+
+def test_relevance_filter_falls_back_to_full_chat_when_no_signal_matches():
+    messages = parse_whatsapp("9/24/26, 8:00 PM - Ana: perhaps mangos tomorrow\n")
+    assert select_relevant_windows(messages) == messages

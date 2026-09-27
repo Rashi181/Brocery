@@ -25,7 +25,7 @@ from .schemas import (
     SpecItem,
 )
 from .whatsapp import participants as get_participants
-from .whatsapp import parse_whatsapp, recent_window, render_for_llm
+from .whatsapp import parse_whatsapp, recent_window, render_for_llm, select_relevant_windows
 
 _RIGIDITY_ORDER = {"flexible": 0, "preferred": 1, "strict": 2}
 _SHARED_WORDS = {"house", "household", "everyone", "all", "us", "we", "group"}
@@ -185,12 +185,15 @@ async def parse_chat(
         raise ContractError("Chat has no messages from people (only system lines).")
 
     known = {p: [f.fact for f in await store_.for_person(p, limit=6)] for p in people}
+    # Keep the full recent transcript for evidence validation and reviewer
+    # display, but send Muse only locally-selected discussion windows.
+    relevant_messages = select_relevant_windows(messages)
     raw = await llm.json_call(
         task="parse_chat",
         system=prompts.PARSE_CHAT_SYSTEM,
-        text=prompts.parse_chat_user(render_for_llm(messages), people, known),
+        text=prompts.parse_chat_user(render_for_llm(relevant_messages), people, known),
         out_model=LLMContract,
-        context={"messages": messages},
+        context={"messages": relevant_messages},
     )
     contract = clean_contract(raw, messages, store.new_contract_id())
     store.put_contract(contract)
