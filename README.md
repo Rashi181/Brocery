@@ -15,12 +15,7 @@ It strengthens connection by removing the stressful planning work, letting peopl
 
 AI is essential because those details are buried in natural conversation. Brocery uses *Meta Muse* and *Gemini* to turn the chaos into a shared grocery plan and bring that context into the store through AR.
 
-## Gemini for In-Store Recognition
-
-Brocery uses **Gemini Vision** to analyze stable frames from the live camera feed and identify the products and grocery categories the shopper is looking at. It matches those detections against the current aisle and the group’s requested items, so AR surfaces only useful guidance—not random products on the shelf.
-
-Gemini connects what the camera sees to what the group actually meant: *“This is an oat-milk option for Priya—unsweetened, under $5, and any brand works.”* By sending selected stable frames instead of every video frame, Brocery keeps recognition fast enough for a real grocery run.
-
+## Visa for enhanced shopping experience 
 For the Visa challenge, we split their ask into two parts and hit both: the "AI-powered commerce experience" side and the "secure, trusted payments" side. We researched what Visa already ships (TAP for agent identity, tokenized credentials for spend caps, AP2-style mandates for audit trails), and worked on fixing the pain points. Here's how each piece maps:
 
 - **Discovery/personalization (GenAI transforming the journey):** Muse Spark parses the messy group chat into a structured contract per item — spec, reason, rigidity, budget — so it's interpreting intent, not keyword matching.
@@ -29,6 +24,14 @@ For the Visa challenge, we split their ask into two parts and hit both: the "AI-
 - **Trusted payments — the second piece:** every confirm-tap generates a signed attestation (passkey, timestamp, checklist state, frame hash) that proves a specific human confirmed a specific item. This is solving the liability/evidence gap that current online agentic payments can't, because they have no human physically present.
 - **Automation layer:** buyer's Visa agent token, spend cap set to the group's budget, passkey checkout, no other cards touched.
 - **Post-purchase:** provides an accuracy leaderboard and split-up of payments to ease any friction, along with a feedback form so the AI can keep improving itself.
+
+
+## Gemini for In-Store Recognition
+
+Brocery uses **Gemini Vision** to analyze stable frames from the live camera feed and identify the products and grocery categories the shopper is looking at. It matches those detections against the current aisle and the group’s requested items, so AR surfaces only useful guidance—not random products on the shelf.
+
+Gemini connects what the camera sees to what the group actually meant: *“This is an oat-milk option for Priya—unsweetened, under $5, and any brand works.”* By sending selected stable frames instead of every video frame, Brocery keeps recognition fast enough for a real grocery run.
+
 
 
 ## ⚙️ Core functions
