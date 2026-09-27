@@ -60,10 +60,25 @@ flowchart TD
     G --> H[Gemini Vision + Meta SAM]
     H --> I[Product guidance and shopper decision]
     I --> J[Shared basket]
-    J --> K[Checkout summary]
+## 🔄 Workflow
 
+```mermaid
+flowchart TD
+    A[WhatsApp group chat] --> B[Upload .txt export]
+    B --> C[Local relevance filtering]
+    C --> D[Gemini + Meta Muse]
+    D --> E[Reviewed grocery contract]
+    E --> F[Aisle-by-aisle route]
+    F --> G[AR / camera shopping]
+    G --> H[Gemini Vision + Meta SAM]
+    H --> I[Product guidance and shopper decision]
+    I --> J[Shared basket]
+    J --> K[Checkout summary]
 ```
 
+## 📁 Project structure
+
+```text
 ├── backend/                         # FastAPI API, trips, cart, checkout, vision routes
 │   ├── main.py                      # Main API and shopping workflow
 │   ├── live.py                      # Live product observation flow
@@ -84,9 +99,9 @@ flowchart TD
 │   └── tests/                       # Intelligence tests
 ├── SETUP.md                         # Additional setup notes
 └── README.md                        # Project documentation
+```
 
 ## Start on Windows
-
 Open **this checkout**, not the old `Project/accesscart-ar` folder. The layout is now `backend/`, `frontend/`, `person2-intelligence/` at the repository root.
 
 Terminal 1, from the repository root:
