@@ -1,4 +1,4 @@
-# AccessCart — integrated MVP
+# Brocery - Shop for your bro with ease
 
 This branch combines `backend` product UI/trip API, `meta` intelligence, and Alex's device-tested WebXR camera/ray/anchor and autofocus work. Payments, passkeys and Visa are deliberately excluded.
 
@@ -36,13 +36,13 @@ npm run dev
 
 Open http://localhost:5180. Port 5174 is blocked on this Windows machine, so this branch uses **5180**. `/api` is proxied to port 8002. Don't set the browser API URL to localhost:8000: on the phone that means the phone itself.
 
-Terminal 3 for the Pixel:
+Terminal 3 for the Samsung:
 
 ```powershell
 cloudflared tunnel --url http://localhost:5180
 ```
 
-Open its HTTPS URL in Chrome on the Pixel. Keep all terminals running. Quick tunnel URLs change on restart; a named Cloudflare tunnel/domain is needed for a permanent URL. No tunnel is created automatically by this repository.
+Open its HTTPS URL in Chrome on the Samsung Galaxy. Keep all terminals running. Quick tunnel URLs change on restart; a named Cloudflare tunnel/domain is needed for a permanent URL. No tunnel is created automatically by this repository.
 
 ## Anchored aisle AR (current default)
 
@@ -92,7 +92,7 @@ A live two-packet screenshot benchmark returned Doritos=chips (matching the chip
 - Trips/contracts live in one backend process. Browser refresh retains the current trip in sessionStorage; a backend restart expires it. Preferences and finished-run scores persist in ignored `backend/data/`. Use one worker until a database replaces these stores.
 - Authentication and multi-household isolation are not part of this hackathon MVP. Run a controlled demo; this is not a production public service.
 - USD only. Shared costs divide among parsed chat participants, shown on the split screen. Exact-match score is verified exact matches / all requests; manual overrides/substitutions/skips are not falsely scored as exact matches.
-- Backboard network behavior and the Pixel camera must be tested with your credentials/device. Local memory works without Backboard.
+- Backboard network behavior and the Samsung camera must be tested with your credentials/device. Local memory works without Backboard.
 
 ## Verification
 
