@@ -23,14 +23,42 @@ export function validBox(b) {
     b[1] + b[3] <= 1.01
   );
 }
+export function sameObject(a, b) {
+  if (overlap(a, b) > 0.5) return true;
+  const areaA = a[2] * a[3],
+    areaB = b[2] * b[3];
+  const intersection =
+    Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0])) *
+    Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
+  // Whole packet + inset mask of the same packet. Keep adjacent packets distinct.
+  return (
+    intersection / Math.min(areaA, areaB) > 0.88 &&
+    Math.min(areaA, areaB) / Math.max(areaA, areaB) > 0.2
+  );
+}
+export function smoothBox(previous, next) {
+  if (!previous) return [...next];
+  return next.map((v, i) =>
+    Math.abs(v - previous[i]) < 0.003
+      ? previous[i]
+      : previous[i] + 0.3 * (v - previous[i]),
+  );
+}
 export function dedupe(detections) {
   const out = [];
-  for (const d of detections.filter((d) => validBox(d.bbox))) {
-    const same = out.find((x) => overlap(x.bbox, d.bbox) > 0.65);
+  for (const d of detections
+    .filter(
+      (d) =>
+        validBox(d.bbox) &&
+        d.bbox[2] * d.bbox[3] > 0.015 &&
+        d.bbox[2] * d.bbox[3] < 0.95,
+    )
+    .sort((a, b) => b.bbox[2] * b.bbox[3] - a.bbox[2] * a.bbox[3])) {
+    const same = out.find((x) => sameObject(x.bbox, d.bbox));
     if (same) same.prompts = [...new Set([...same.prompts, d.prompt])];
     else out.push({ ...d, prompts: [d.prompt] });
   }
-  return out.slice(0, 4);
+  return out;
 }
 export function signature(frame, width, height, box = [0, 0, 1, 1]) {
   const values = [];

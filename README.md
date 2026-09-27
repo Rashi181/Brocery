@@ -90,7 +90,7 @@ Real Pixel focus, rotations, occlusion, hand hit-testing, and thermal performanc
 ## Practical limits
 
 - The catalog/aisle layout is the temporary backend demo catalog, not a live store database. Prices must come from readable evidence or the shopper; there are no fabricated catalog prices.
-- Up to four products tracked simultaneously; up to twelve request comparisons per automatic reading. Large aisle prompt lists rotate in batches. This is a controlled demo target, not crowded-shelf tracking.
+- Up to two products tracked simultaneously; up to twelve request comparisons per automatic reading. Large aisle prompt lists rotate in batches. This is a controlled demo target, not crowded-shelf tracking.
 - Local tracking is lightweight block matching, not SAM video tracking. A short hand-guided continuity bridge requests identity verification on turns; fast rotation, occlusion, crossing products, and blur may require automatic reacquisition or showing the front again.
 - Automatic detection waits at least 8 seconds between calls and avoids unchanged tracked scenes. Readings are serialized and changed-view gated, with retry backoff. Cloud calls still use API credits; this is not continuous cloud video inference.
 - Tracking/hand sampling targets roughly 8 Hz in workers; the browser renders video independently. Camera focus depends on device capabilities. Moving offscreen resets identity and evidence.
@@ -133,3 +133,7 @@ This branch is named `meta-AR-frontback` because Git branch names cannot contain
 - Browser `http://localhost:5180/live-check.html` is a developer-only synthetic fixture: it initializes the real MediaPipe worker, runs blank-frame inference, and can replay two textured packets and synthetic pinch landmarks without camera access or cloud calls. It is not included in the production entry/build. Do not interpret synthetic passes as product-recognition accuracy.
 - One real new-endpoint Muse check on the user's bottle image: HTTP 200 in 17.8 seconds, water bottle identified, price null. No alternative provider has been benchmarked or claimed more accurate.
 - After implementation, restart `backend/start.ps1` to load `/api/product/observe`. The frontend remains on 5180, backend 8002. Keep the existing Cloudflare tunnel if still running.
+
+### Overlay stability update
+
+Candidate cards stay compact until identified. Cards retain left/right slots and connect to smoothed product boxes; they no longer reorder or jump vertically with raw tracking coordinates. Nested/repeated detections are merged, short tracking misses hide checks during a 420 ms reacquisition window, and the broad package prompt is only a fallback after empty scans. Camera capture and backend contracts are unchanged.

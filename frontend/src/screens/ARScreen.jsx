@@ -4,7 +4,6 @@ import { useStore } from "../store";
 import BudgetBar from "../components/BudgetBar";
 import DecisionCard from "../components/DecisionCard";
 import { LiveCamera } from "../ar/LiveCamera";
-import { clamp } from "../ar/liveMath";
 
 function initialChecks(item) {
   return [
@@ -46,7 +45,6 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
   const focusId = tracks
     .filter((t) => t.scale > 1.22)
     .sort((a, b) => b.scale - a.scale)[0]?.id;
-  const ordered = [...tracks].sort((a, b) => a.box[0] - b.box[0]);
   const tripId = state.tripId;
   useEffect(() => {
     if (!tripId || !video.current) return;
@@ -136,7 +134,9 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
           />
           {tracks.map((track, index) => {
             const reading = track.reading;
-            const data = track.needsIdentity ? null : reading?.data;
+            const data =
+              track.needsIdentity || track.lost ? null : reading?.data;
+            const box = track.visualBox || track.box;
             const assessments =
               data?.assessments.filter((a) =>
                 items.some((i) => i.id === a.item_id),
@@ -148,10 +148,15 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
               : assessments.filter((a) => a.identity !== "fail");
             const expanded = track.scale > 1.22;
             const compact = !!focusId && focusId !== track.id;
-            const title = data?.product_name || "Identifying product…";
-            const lane = ordered.findIndex((t) => t.id === track.id);
-            const baseWidth =
-              tracks.length > 1 ? Math.min(210, (size.width - 24) / 2) : 210;
+            const title =
+              data?.product_name ||
+              (track.lost
+                ? "Reacquiring…"
+                : reading?.pending
+                  ? "Reading packet…"
+                  : "Product candidate");
+            const lane = track.slot ?? index % 2;
+            const baseWidth = Math.min(210, (size.width - 24) / 2);
             const cardWidth = Math.max(
               100,
               Math.min(
@@ -168,22 +173,32 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
               ? 8
               : compact
                 ? Math.max(8, size.height - 85)
-                : tracks.length > 2
-                  ? 8 + Math.floor(lane / 2) * size.height * 0.48
-                  : clamp(
-                      track.box[1] * size.height - 90,
-                      8,
-                      Math.max(8, size.height - 230),
-                    );
+                : 8;
             return (
               <div key={track.id}>
+                <svg
+                  className="live-leader"
+                  width="100%"
+                  height="100%"
+                  aria-hidden="true"
+                >
+                  <line
+                    x1={(box[0] + box[2] / 2) * size.width}
+                    y1={(box[1] + box[3] / 2) * size.height}
+                    x2={left + cardWidth / 2}
+                    y2={top + 40}
+                    stroke="currentColor"
+                    strokeWidth="1"
+                  />
+                </svg>
                 <div
                   className={`live-object ${track.held ? "held" : ""}`}
                   style={{
-                    left: track.box[0] * 100 + "%",
-                    top: track.box[1] * 100 + "%",
-                    width: track.box[2] * 100 + "%",
-                    height: track.box[3] * 100 + "%",
+                    left: box[0] * 100 + "%",
+                    top: box[1] * 100 + "%",
+                    width: box[2] * 100 + "%",
+                    height: box[3] * 100 + "%",
+                    opacity: track.lost ? 0.2 : 1,
                   }}
                 />
                 <article
@@ -198,7 +213,14 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                     width: cardWidth,
                     fontSize: `${12 * track.scale}px`,
                     zIndex: track.resizing ? 20 : index + 2,
-                    maxHeight: expanded ? "78%" : compact ? "80px" : "48%",
+                    maxHeight: expanded
+                      ? "78%"
+                      : compact
+                        ? "80px"
+                        : data
+                          ? "42%"
+                          : "112px",
+                    opacity: track.lost ? 0.4 : 1,
                   }}
                   aria-label={`${title} live details`}
                 >
@@ -220,7 +242,9 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                     <small>
                       {data
                         ? "Request match not yet verified"
-                        : "Checking against your list"}
+                        : reading?.pending
+                          ? "Checking your list…"
+                          : "Waiting for a steady view"}
                     </small>
                   )}
                   {!compact &&
@@ -242,7 +266,7 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                           </small>
                           <ul>
                             {a.result.checklist
-                              .slice(0, expanded ? 100 : 3)
+                              .slice(0, expanded ? 100 : 2)
                               .map((c, i) => (
                                 <li key={i} className={c.status}>
                                   <span>
@@ -276,7 +300,8 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                         </section>
                       );
                     })}
-                  {!compact &&
+                  {expanded &&
+                    !compact &&
                     !data &&
                     pending.map((i) => (
                       <section className="live-request" key={i.id}>
@@ -317,9 +342,11 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                       <small>Unreadable text stays unverified.</small>
                     </section>
                   )}
-                  <small className="live-pinch-hint">
-                    Pinch here in the air · spread to enlarge
-                  </small>
+                  {(data || expanded) && (
+                    <small className="live-pinch-hint">
+                      Pinch here in the air · spread to enlarge
+                    </small>
+                  )}
                 </article>
               </div>
             );

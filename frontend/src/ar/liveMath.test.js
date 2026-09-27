@@ -6,7 +6,27 @@ import {
   resizeGesture,
   sharpness,
   difference,
+  smoothBox,
 } from "./liveMath.js";
+
+test("nested masks collapse into one packet without merging its neighbour", () => {
+  const found = dedupe([
+    { prompt: "chips", bbox: [0.1, 0.2, 0.3, 0.5] },
+    { prompt: "food package", bbox: [0.14, 0.25, 0.2, 0.35] },
+    { prompt: "Oreo", bbox: [0.55, 0.2, 0.3, 0.5] },
+  ]);
+  assert.equal(found.length, 2);
+  assert.deepEqual(found[0].prompts, ["chips", "food package"]);
+});
+test("visual smoothing suppresses jitter without altering the analysis box", () => {
+  const before = [0.1, 0.2, 0.3, 0.4],
+    tiny = [0.101, 0.201, 0.3, 0.4];
+  assert.deepEqual(smoothBox(before, tiny), before);
+  const moved = [0.3, 0.4, 0.3, 0.4];
+  const result = smoothBox(before, moved);
+  assert.ok(result[0] > 0.1 && result[0] < 0.3);
+  assert.deepEqual(moved, [0.3, 0.4, 0.3, 0.4]);
+});
 
 test("overlapping prompts become one object but adjacent packets stay separate", () => {
   const found = dedupe([

@@ -166,9 +166,13 @@ export class LiveCamera {
     if (fatal) this.fatal = true;
   }
   publish() {
+    const now = performance.now();
+    if (now - (this.lastPublish || 0) < 90) return;
+    this.lastPublish = now;
     this.cb.tracks(
       this.tracks.map((t) => ({
         ...t,
+        visualBox: t.displayBox || t.box,
         reading: this.readings.get(t.id),
         scale: this.scales.get(t.id) || 1,
         held: this.heldId === t.id,
@@ -304,6 +308,7 @@ export class LiveCamera {
         .filter((t) => {
           const old = this.readings.get(t.id);
           return (
+            !t.lost &&
             t.sharp >= 9 &&
             now - t.stableSince > 500 &&
             (!old ||
@@ -371,6 +376,7 @@ export class LiveCamera {
     );
     this.promptOffset = offset + 5;
     if (
+      (this.emptyScans || 0) >= 2 &&
       this.items.some((i) =>
         /chips|oreo|snack|cracker|cookie|cheetos/i.test(i.item),
       )
@@ -380,6 +386,7 @@ export class LiveCamera {
     try {
       const data = await this.api.detect(this.tripId, photo, prompts, signal);
       if (this.closed) return;
+      this.emptyScans = data.detections.length ? 0 : (this.emptyScans || 0) + 1;
       this.trackWorker.postMessage({
         type: "detections",
         sequence,

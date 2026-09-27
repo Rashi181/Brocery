@@ -691,6 +691,13 @@ body:has(.ar-root) #root > .mode-banner {
     width 0.1s linear,
     height 0.1s linear;
 }
+.live-leader {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: #a3ebbf;
+  opacity: 0.32;
+}
 .live-object.held {
   border: 2px solid #b5ffd0;
   box-shadow: 0 0 18px #61e8a526;

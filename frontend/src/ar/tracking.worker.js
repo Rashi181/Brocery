@@ -3,7 +3,8 @@ import {
   clamp,
   contains,
   dedupe,
-  overlap,
+  sameObject,
+  smoothBox,
   signature,
   difference,
   sharpness,
@@ -53,7 +54,17 @@ self.onmessage = ({ data }) => {
         t.recoveredAt = data.time;
         t.generation = (t.generation || 0) + 1;
       }
-      if (!moved) return []; // Never leave a frozen label on a lost object.
+      if (!moved) {
+        const missingSince = t.missingSince ?? data.time;
+        // Brief misses don't create new cards. Hide checks during this grace period.
+        return data.time - missingSince < 420
+          ? [{ ...t, missingSince, lost: true }]
+          : [];
+      }
+      if (t.lost && moved.error > 12) {
+        needsIdentity = true;
+        t.generation = (t.generation || 0) + 1;
+      }
       const sig = signature(data.gray, W, H, moved.box);
       const stable = difference(sig, t.signature) < 0.06;
       const fresh = seedTrack(data.gray, W, H, moved.box);
@@ -67,6 +78,9 @@ self.onmessage = ({ data }) => {
           ...t,
           local: moved,
           box: moved.box,
+          displayBox: smoothBox(t.displayBox, moved.box),
+          missingSince: null,
+          lost: false,
           signature: sig,
           hand,
           needsIdentity,
@@ -75,6 +89,16 @@ self.onmessage = ({ data }) => {
         },
       ];
     });
+    const unique = [];
+    for (const t of tracks) {
+      const existing = unique.find(
+        (x) => !x.lost && !t.lost && sameObject(x.box, t.box),
+      );
+      if (existing)
+        existing.prompts = [...new Set([...existing.prompts, ...t.prompts])];
+      else unique.push(t);
+    }
+    tracks = unique;
     self.postMessage({
       type: "tracks",
       sequence: data.sequence,
@@ -82,6 +106,9 @@ self.onmessage = ({ data }) => {
       tracks: tracks.map((t) => ({
         id: t.id,
         box: t.box,
+        displayBox: t.displayBox,
+        slot: t.slot,
+        lost: t.lost || false,
         prompts: t.prompts,
         signature: t.signature,
         stableSince: t.stableSince,
@@ -104,13 +131,22 @@ self.onmessage = ({ data }) => {
         if (local) local = moveTrack(local, f.gray, W, H);
       }
       if (!local) continue;
-      const existing = tracks.find((t) => overlap(t.box, local.box) > 0.5);
-      if (existing) continue;
-      if (tracks.length >= 4) break;
+      const existing = tracks.find((t) => sameObject(t.box, local.box));
+      if (existing) {
+        existing.prompts = [...new Set([...existing.prompts, ...d.prompts])];
+        continue;
+      }
+      if (tracks.length >= 2) break;
       const latest = frames.at(-1);
+      const preferred = local.box[0] + local.box[2] / 2 < 0.5 ? 0 : 1;
+      const slot = tracks.some((t) => t.slot === preferred)
+        ? 1 - preferred
+        : preferred;
       tracks.push({
         id: `object-${++nextId}`,
         box: local.box,
+        displayBox: [...local.box],
+        slot,
         local,
         prompts: d.prompts,
         stableSince: latest.time,

@@ -22,12 +22,23 @@ test("worker replays delayed detections and drops lost objects without recycling
   });
   send({ type: "frame", gray, sequence: 3, time: 240 });
   assert.equal(messages.at(-1).tracks.length, 2);
+  assert.deepEqual(
+    messages.at(-1).tracks.map((t) => t.slot),
+    [0, 1],
+  );
   const old = messages.at(-1).tracks.map((t) => t.id);
   send({
     type: "frame",
     gray: new Uint8Array(160 * 160),
     sequence: 4,
     time: 360,
+  });
+  assert.ok(messages.at(-1).tracks.every((t) => t.lost));
+  send({
+    type: "frame",
+    gray: new Uint8Array(160 * 160),
+    sequence: 40,
+    time: 900,
   });
   assert.equal(messages.at(-1).tracks.length, 0);
   send({ type: "frame", gray, sequence: 5, time: 12000 });
