@@ -18,6 +18,8 @@ The script creates a virtual environment under your own Windows account and repa
 
 ```dotenv
 SAM_API_KEY=your-key
+GEMINI_API_KEY=your-google-key
+GEMINI_SCENE_MODEL=gemini-3.1-flash-lite
 LLM_MODE=live
 SAM_MODE=live
 ```
@@ -42,35 +44,36 @@ cloudflared tunnel --url http://localhost:5180
 
 Open its HTTPS URL in Chrome on the Pixel. Keep all terminals running. Quick tunnel URLs change on restart; a named Cloudflare tunnel/domain is needed for a permanent URL. No tunnel is created automatically by this repository.
 
-## One end-to-end physical test
+## Anchored aisle AR (current default)
 
-Put a water bottle, Cheetos packet and yellow rubber duck on a table. Use **live** mode. Paste:
+Enter an aisle and tap **START AR** once: Chrome requires a user gesture to start immersive WebXR. Recognition thereafter is automatic. The default `/ar` route uses the original raw WebXR camera, capture-pose ray mapping, plane hit tests and world anchors. It does not use getUserMedia or the block-matching tracker.
 
-```text
-9/26/26, 1:00 PM - Alex: Please get one bag of Cheetos. No dairy, strict.
-9/26/26, 1:01 PM - Priya: A water bottle, any brand, under $3.
-9/26/26, 1:02 PM - Alex: Also a rubber duck, yellow only.
-9/26/26, 1:03 PM - Priya: Actually two bottles, same budget per bottle.
-9/26/26, 1:04 PM - Alex: Dish soap for everyone, any brand.
-```
+One Gemini Flash-Lite request reads the visible groceries, their boxes and which pending aisle requests match. It includes unrelated groceries with no match: Oreo must not inherit a chips request. Existing anchors keep rendering locally while the request runs; nearby anchors of the same category are updated without replacing their physical anchor. The request loop has one scene request at a time and a 3.5-second gap after completion. Unobserved anchors expire after 15 seconds.
 
-1. Build list. Expect four requests: Cheetos with dairy excluded; two water bottles up to $3 each; yellow-only duck; shared soap. Review/edit all fields, set your runner name, acknowledge review, budget $20, start.
-2. Open Beverages → START AR. Allow camera/AR access. Move slowly to map the table. Scan shelf. A bottle candidate should appear; tap its captured box or double-tap its world label. Walk sideways to verify label position. If no plane was found, the app says so rather than inventing an anchor.
-3. Use Read label for sharp close-ups. Camera focus is requested only when the camera exposes the capability. Capture a sharp front/ingredients photo and check it. Unreadable price must stay unknown. Enter unit and total price yourself, explicitly record your decision if any check is unresolved. Confirm quantity of two bottles. Remaining budget should subtract the **total**, exactly once.
-4. In Snacks inspect the Cheetos ingredients. If the photo clearly says `CONTAINS MILK INGREDIENTS`, dairy must fail and the strict recommendation must be skip. Do not accept a dairy-free pass. Tap Skip or deliberately record an override and its reason.
-5. In Toys scan the yellow duck. Use **In hand → Find held product**, hold it still through detection, then move gently. The local box should follow; if it loses confidence it should disappear. Open the full checklist to decide. This is the main remaining hardware acceptance check.
-6. For unavailable soap choose Not found. Basket must show the bottle, any duck decision, skipped Cheetos/soap and their reasons. Undo one item and verify the budget returns, then add it again.
-7. Household split must reconcile to the basket total. Finish run records one leaderboard entry. Download the PNG share card or copy text. Add a preference correction. Nothing is purchased or sent to a chat.
+These are **shelf-position anchors, not continuous tracking of a moving packet**. Picking up or replacing a packet requires a new scene observation. Ingredient evidence is not carried over between unverified scene identities. Muse reads ingredient views asynchronously when a matched ingredient panel is visible; the category/title does not wait for it. The short scene call uses the aisle list but never asserts dietary suitability.
 
-If a step fails, keep the visible error and backend terminal output. A successful build does not certify Pixel anchor alignment, autofocus or real-world tracking.
+Air pinch over an anchored name for 0.3 seconds, then spread/close fingers to resize. Hand input uses a GPU-downsampled 320px AR frame and the existing local MediaPipe worker. Tap an AR name or its bottom product button for the checklist; Add to cart retains explicit price/uncertainty confirmation. No photo-taking step is needed. Physical AR anchoring and hand gestures still require Samsung/Pixel testing.
+
+If immersive AR is unsupported, the start screen offers a clearly labelled standard-camera fallback at `/ar/camera`. The original manual AR test screen remains `/ar/anchors`.
+
+### Acceptance test
+
+1. Restart the backend from this checkout (`.\backend\start.ps1` at repository root). Keep Vite and the existing Cloudflare tunnel running; refresh the phone and start a fresh trip.
+2. Import a list requesting chips for Alex (avoid dairy) and pasta for Priya. Enter the relevant aisle and tap START AR. Move slowly to map the table/shelf.
+3. Show Doritos and Oreo together. Expect Doritos/chips associated with Alex; Oreo/cookies says not on this aisle's list. No SAM-derived guesses should assign Oreo to chips.
+4. Leave both packets stationary and move the phone slowly left/right. The names should remain at shelf positions while new scene requests run, without repeated jumping from the old 2D tracker.
+5. Air-pinch a name to resize it. Tap it for the checklist. Ingredients remain unknown until actually read. Add to cart still requires a deliberate action.
+6. Move a packet. Its old shelf anchor is not object-following: verify subsequent scene observations update placement and old anchors expire. Do not count this as continuous held-object tracking.
+
+A live two-packet screenshot benchmark returned Doritos=chips (matching the chips request) and Oreo=cookies (no match) in 3.5 seconds using Flash-Lite. This is one image benchmark, not a guarantee of network latency or physical AR performance.
 
 ## What is implemented
 
 - Meta WhatsApp parsing, source evidence, later corrections, avoid/spec/reason/rigidity/quantity/budget/shared fields; reviewed edits are saved into the contract actually used by analysis.
 - Supi's mobile import/review/aisle/budget interface, real API wiring, product cards, basket undo, per-person split and share card.
 - SAM one-bit segmentation decoded with the same parser as Alex's tested code; multiple prompts, normalized **x,y,width,height**, no invented confidence value.
-- Multiple world-anchored shelf labels using captured camera pose and plane hit tests. Double-tap label inspection; cards expand on tap.
-- Sharp autofocus label camera plus in-hand center-candidate selection and lightweight local block-matching motion tracking between API calls.
+- Default WebXR shelf anchors with automatic Gemini scene recognition and air-pinch resizing; standard-camera tracking remains an explicit fallback.
+- One autofocus camera, automatic sharp-view sampling, hand-prioritized checks, and worker-based local tracking between API calls.
 - Criterion-by-criterion reasoning. Unknown is review, not a match. Explicit milk declarations override contradictory AI checks. Warnings/failures appear first. Strict conflicts recommend skip; flexible alternatives require actual same-trip shelf candidates.
 - Alternative grounding uses a detection ID and the retained shelf image, scoped to a trip and expiring after 120 seconds. No global fuzzy product-name/bounding-box matching.
 - Retry-safe integer-cent cart and shared-cost splitting; total price and unit price are separate. Overrides need a reason and feed preference memory.
@@ -80,9 +83,11 @@ If a step fails, keep the visible error and backend terminal output. A successfu
 ## Practical limits
 
 - The catalog/aisle layout is the temporary backend demo catalog, not a live store database. Prices must come from readable evidence or the shopper; there are no fabricated catalog prices.
-- Shelf scans are deliberate captures, up to six distinct product prompts per scan. In-hand detection starts with a button and selects the center candidate; fully automatic pickup recognition is not implemented.
-- The local tracker is lightweight block matching, not a trained tracker. Rotation, blur and occlusion can lose it; reacquisition is explicit. It has not been validated on the Pixel yet.
-- Moving from WebXR to the autofocus/hand camera ends that XR session. Restart AR and rescan to place labels again. ARCore anchors are not persisted across sessions.
+- Up to two products tracked simultaneously; up to twelve request comparisons per automatic reading. Large aisle prompt lists rotate in batches. This is a controlled demo target, not crowded-shelf tracking.
+- Local tracking is lightweight block matching, not SAM video tracking. A short hand-guided continuity bridge requests identity verification on turns; fast rotation, occlusion, crossing products, and blur may require automatic reacquisition or showing the front again.
+- Automatic detection waits at least 8 seconds between calls and avoids unchanged tracked scenes. Readings are serialized and changed-view gated, with retry backoff. Cloud calls still use API credits; this is not continuous cloud video inference.
+- Tracking/hand sampling targets roughly 8 Hz in workers; the browser renders video independently. Camera focus depends on device capabilities. Moving offscreen resets identity and evidence.
+- MediaPipe 0.10.32 and its hand model are served locally (about 30 MB of assets, browser-cached). No third-party CDN is required on the phone. Gesture initialization failure leaves scanning available and reports the limitation.
 - No 60fps inference promise: the phone renders independently while cloud calls take seconds. Live smoke timings are below.
 - Trips/contracts live in one backend process. Browser refresh retains the current trip in sessionStorage; a backend restart expires it. Preferences and finished-run scores persist in ignored `backend/data/`. Use one worker until a database replaces these stores.
 - Authentication and multi-household isolation are not part of this hackathon MVP. Run a controlled demo; this is not a production public service.
@@ -113,3 +118,15 @@ Branch source snapshots:
 - alex-branch: `f3aea439aa3cfe22bdeb818bd3e4b8c3e9eb6acf`, plus tested local camera/focus helpers.
 
 This branch is named `meta-AR-frontback` because Git branch names cannot contain spaces. Work was done in a separate clone to protect the original checkout and its uncommitted work.
+
+## Automatic-camera verification (this update)
+
+- Existing Python suite plus new live-reading regressions: wrong-trip/malformed-image rejection, result/cart binding, missing assessments, product changes, and explicit milk conflicts.
+- JavaScript tests cover gesture dwell/resize/release, depth normalization, duplicate detections, delayed detection replay, loss/reacquisition identities, and the original camera math.
+- Browser `http://localhost:5180/live-check.html` is a developer-only synthetic fixture: it initializes the real MediaPipe worker, runs blank-frame inference, and can replay two textured packets and synthetic pinch landmarks without camera access or cloud calls. It is not included in the production entry/build. Do not interpret synthetic passes as product-recognition accuracy.
+- One real new-endpoint Muse check on the user's bottle image: HTTP 200 in 17.8 seconds, water bottle identified, price null. No alternative provider has been benchmarked or claimed more accurate.
+- After implementation, restart `backend/start.ps1` to load `/api/product/observe`. The frontend remains on 5180, backend 8002. Keep the existing Cloudflare tunnel if still running.
+
+### Overlay stability update
+
+Candidate cards stay compact until identified. Cards retain left/right slots and connect to smoothed product boxes; they no longer reorder or jump vertically with raw tracking coordinates. Nested/repeated detections are merged, short tracking misses hide checks during a 420 ms reacquisition window, and the broad package prompt is only a fallback after empty scans. Camera capture and backend contracts are unchanged.

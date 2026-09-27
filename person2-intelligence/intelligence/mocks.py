@@ -40,6 +40,10 @@ class MockLLM:
         ctx = context or {}
         if task == "parse_chat":
             data = json.loads((FIXTURES / "parse_chat.json").read_text())
+        elif task == "live_observe":
+            data = {"product_name": "Demo product", "visible_text": "DEMO EVIDENCE",
+                    "view": "front", "same_product": "yes",
+                    "assessments": [{"item_id": i.id, "analysis": self._analysis(i)} for i in ctx["items"]]}
         elif task == "analyze_product":
             data = self._analysis(ctx["item"])
         else:

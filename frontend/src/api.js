@@ -28,6 +28,18 @@ const post = (path, body) =>
   req(path, { method: "POST", body: JSON.stringify(body) });
 
 export const api = {
+  scene: (body, signal) => req("/product/scene", {
+    method: "POST", body: JSON.stringify(body), signal,
+  }),
+  identify: (body, signal) => req("/product/identify", {
+    method: "POST", body: JSON.stringify(body), signal,
+  }),
+  observe: (body, signal) =>
+    req("/product/observe", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+    }),
   health: () => get("/health"),
   finish: (trip_id) => post("/trip/finish", { trip_id }),
   leaderboard: () => get("/leaderboard"),
@@ -40,8 +52,12 @@ export const api = {
   getAisles: (contract_id) =>
     get(`/aisles?contract_id=${encodeURIComponent(contract_id)}`),
 
-  detect: (trip_id, image_b64, prompts) =>
-    post("/vision/detect", { trip_id, image_b64, prompts }),
+  detect: (trip_id, image_b64, prompts, signal) =>
+    req("/vision/detect", {
+      method: "POST",
+      body: JSON.stringify({ trip_id, image_b64, prompts }),
+      ...(signal ? { signal } : {}),
+    }),
 
   analyze: (trip_id, item_id, image_b64, scan_id) =>
     post("/product/analyze", { trip_id, item_id, image_b64, scan_id }),

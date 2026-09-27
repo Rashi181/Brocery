@@ -101,7 +101,7 @@ export default function AislesScreen() {
                     className="w-full mt-2 py-2.5 rounded-xl bg-white/10
                                hover:bg-white/15 text-sm font-medium"
                   >
-                    Scan aisle {a.aisle_no}
+                    Enter aisle {a.aisle_no}
                   </button>
                 )}
               </div>

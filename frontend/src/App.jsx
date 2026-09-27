@@ -4,6 +4,8 @@ import ImportScreen from "./screens/ImportScreen";
 import ReviewScreen from "./screens/ReviewScreen";
 import AislesScreen from "./screens/AislesScreen";
 const ARScreen = lazy(() => import("./screens/ARScreen"));
+const LegacyARScreen = lazy(() => import("./screens/LegacyARScreen"));
+const AnchoredShoppingScreen = lazy(() => import("./screens/AnchoredShoppingScreen"));
 import CartScreen from "./screens/CartScreen";
 import SettlementScreen from "./screens/SettlementScreen";
 import { api } from "./api";
@@ -40,7 +42,18 @@ export default function App() {
             <Suspense
               fallback={<main className="page">Preparing camera…</main>}
             >
-              <ARScreen mode={mode} />
+              <AnchoredShoppingScreen />
+            </Suspense>
+          }
+        />
+        <Route path="/ar/camera" element={<Suspense fallback={<main className="page">Preparing camera…</main>}><ARScreen mode={mode}/></Suspense>}/>
+        <Route
+          path="/ar/anchors"
+          element={
+            <Suspense
+              fallback={<main className="page">Preparing anchors…</main>}
+            >
+              <LegacyARScreen mode={mode} />
             </Suspense>
           }
         />

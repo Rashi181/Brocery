@@ -49,7 +49,12 @@ export function moveTrack(previous, frame, width, height) {
               sum + Math.abs(v - mean - (previous.template[i] - previous.mean)),
             0,
           ) / sample.length;
-        if (!best || error < best.error) best = { box, error };
+        // Break near-ties in favor of staying still, not shrinking onto table texture.
+        const score =
+          error +
+          0.025 * (Math.abs(dx) + Math.abs(dy)) +
+          5 * Math.abs(scale - 1);
+        if (!best || score < best.score) best = { box, error, score };
       }
   if (!best || best.error > 24) return null;
   return { ...previous, box: best.box, error: best.error };

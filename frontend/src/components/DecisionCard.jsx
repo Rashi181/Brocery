@@ -8,6 +8,7 @@ export default function DecisionCard({
   onDone,
   onRetake,
   onAlternative,
+  live = false,
 }) {
   const { confirmItem, substituteItem, skipItem } = useStore();
   const [price, setPrice] = useState(
@@ -214,7 +215,7 @@ export default function DecisionCard({
         </button>
       )}
       <button disabled={busy} onClick={onRetake}>
-        Read another side / retake
+        {live ? "Back to live checks" : "Read another side / retake"}
       </button>
     </section>
   );
