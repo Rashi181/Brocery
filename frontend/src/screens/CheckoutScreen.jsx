@@ -10,7 +10,7 @@ export default function CheckoutScreen(){
  const added=purchasedLines(lines);
  return <main className="page pb-32">
   <button onClick={()=>nav("/cart")}>← Basket</button>
-  <p className="eyebrow mt-6">YOUR CHECKOUT</p><h1>Everyone’s<span className="h1-accent">little essentials.</span></h1>
+  <p className="eyebrow mt-6">THE BROCERY CHECKOUT</p><h1>Your bros’<span className="h1-accent">little essentials.</span></h1>
   {error&&<p className="error" role="alert">{error}</p>}
   {!added.length?<section className="panel"><h2>Your basket is empty</h2><button onClick={()=>nav(tripId?"/aisles":"/")}>Start shopping</button></section>:
    <div className="stack">{added.map(l=><article className="panel" key={l.item_id}>

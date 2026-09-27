@@ -51,7 +51,7 @@ export default function SettlementScreen() {
   }
   function summary() {
     return [
-      "AccessCart · household shopping summary",
+      "BroCery · shopping summary",
       `Total: $${data.total.toFixed(2)} USD`,
       ...data.members.map((m) => `${m.name}: $${m.amount.toFixed(2)}`),
       "",

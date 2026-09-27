@@ -99,7 +99,7 @@ export default function ImportScreen() {
       <header className="topbar">
         <div className="brand">
           <span className="app-tile">{icon.bag}</span>
-          AccessCart
+          BroCery
         </div>
         <button
           className="pill-btn"
@@ -112,7 +112,7 @@ export default function ImportScreen() {
       </header>
 
       <h1>
-        What does everyone need
+        What do your bros need
         <span className="h1-accent">from the store?</span>
       </h1>
       <p className="lede">
@@ -222,7 +222,7 @@ export default function ImportScreen() {
           onClick={submit}
           disabled={!text.trim() || loading}
         >
-          {loading ? "Reading the chat…" : "Build the list"}
+          {loading ? "Reading the chat…" : "Bro, make the list"}
         </button>
         <p className="fineprint">
           Nothing is bought or sent. You approve every item.

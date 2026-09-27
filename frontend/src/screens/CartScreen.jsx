@@ -37,7 +37,7 @@ export default function CartScreen() {
         The basket
       </p>
       <h1>
-        Everyone
+        Every bro
         <span className="h1-accent">accounted for.</span>
       </h1>
       <BudgetBar />
@@ -85,7 +85,7 @@ export default function CartScreen() {
           className="primary cta block"
           onClick={() => nav("/checkout")}
         >
-          Checkout →
+          Check out, bro →
         </button>
         <small className="muted">
           Shopping summary only. No payment is collected.

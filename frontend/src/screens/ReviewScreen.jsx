@@ -34,14 +34,14 @@ export default function ReviewScreen() {
   }
   return (
     <main className="page pb-64">
-      <p className="eyebrow">Review the requests</p>
+      <p className="eyebrow">Bro, here’s the list</p>
       <h1>
         {items.length} things.
         <span className="h1-accent">One good run.</span>
       </h1>
       <p className="muted">
-        Check what everyone meant before heading into the aisle. All amounts are
-        USD.
+        Check what your bros meant before heading into the aisle. All amounts
+        are USD.
       </p>
       {!!unresolved.length && (
         <aside className="notice">
@@ -221,7 +221,7 @@ export default function ReviewScreen() {
             }
             onClick={start}
           >
-            {loading ? "Preparing your route…" : "Start shopping"}
+            {loading ? "Preparing your route…" : "Let’s shop, bro"}
           </button>
         </div>
       </footer>

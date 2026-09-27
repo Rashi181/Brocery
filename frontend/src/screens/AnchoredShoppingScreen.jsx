@@ -14,7 +14,7 @@ export default function AnchoredShoppingScreen() {
   const state=useStore(), nav=useNavigate(), overlay=useRef(null), xr=useRef(null);
   const lifecycle=useRef(0), controllers=useRef(new Set()), serial=useRef(0), reading=useRef(false);
   const [active,setActive]=useState(false), [products,setProducts]=useState([]);
-  const [error,setError]=useState(""), [status,setStatus]=useState("Start AR once; product recognition is automatic.");
+  const [error,setError]=useState(""), [status,setStatus]=useState("Start AR once, bro; product recognition is automatic.");
   const [selected,setSelected]=useState(null), [decision,setDecision]=useState(null);
   const [checks,setChecks]=useState({});
   const adding=useRef(new Set());
@@ -64,7 +64,7 @@ export default function AnchoredShoppingScreen() {
       });
       setProducts(detections); setError("");
       await xr.current?.place(detections,items,pose);
-      setStatus(detections.length ? `${detections.length} finds for your household · tap a tag to shop` : "Looking for items on your household list…");
+      setStatus(detections.length ? `${detections.length} finds for your bros · tap a tag to shop` : "Looking for items on your bro list…");
       const ingredients=detections.find((d)=>d.view==="ingredients" && d.matched_item_ids.length);
       if(ingredients) void inspectIngredients(ingredients,photo,token);
     } catch(e) {
