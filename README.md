@@ -1,7 +1,7 @@
 # Brocery - Shop for your bro with ease
-BroCery is the grocery-shopping bro who actually remembers everything.
+Brocery is the grocery-shopping bro who actually remembers everything.
 
-Group grocery shopping usually starts in a chaotic chat: one bro wants oat milk, another has an allergy, someone says “anything is fine,” and somebody else changes their mind five messages later. BroCery turns that chaos into one smart, shared shopping experience.
+Group grocery shopping usually starts in a chaotic chat: one bro wants oat milk, another has an allergy, someone says “anything is fine,” and somebody else changes their mind five messages later. Brocery turns that chaos into one smart, shared shopping experience.
 
 Upload the group WhatsApp chat, and BroCery extracts every request, preference, dietary restriction, budget, and allowed replacement. It gives the shopper a clean list organized by aisle, then uses AR and product recognition in-store to help them spot the right item, check whether it fits the request, and add it to the shared basket. At checkout, everyone can see what was actually picked up.
 
