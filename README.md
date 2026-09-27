@@ -62,7 +62,7 @@ flowchart TD
     I --> J[Shared basket]
     J --> K[Checkout summary]
 
-
+```
 
 ├── backend/                         # FastAPI API, trips, cart, checkout, vision routes
 │   ├── main.py                      # Main API and shopping workflow
