@@ -74,6 +74,7 @@ flowchart TD
     H --> I[Product guidance and shopper decision]
     I --> J[Shared basket]
     J --> K[Checkout summary]
+
 ```
 
 ## 📁 Project structure
