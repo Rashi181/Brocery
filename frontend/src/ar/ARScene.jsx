@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useImperativeHandle } from "react";
 import * as THREE from "three";
 import { detectionRay } from "./detectionRay";
 import { cameraPixelsToJpeg, readCameraPixels } from "./cameraFrame";
+import {createHandReader} from "./xrHandFrame";
+import {handPointer, resizeGesture} from "./liveMath";
 
 function label(detection, requester) {
   const canvas = document.createElement("canvas");
@@ -15,13 +17,13 @@ function label(detection, requester) {
   ctx.fillStyle = "#6ee7b7";
   ctx.fillRect(0, 28, 9, 200);
   ctx.font = "bold 48px sans-serif";
-  ctx.fillText(detection.prompt.slice(0, 25), 30, 76, 708);
+  ctx.fillText((detection.name || detection.prompt).slice(0, 36), 30, 76, 708);
   ctx.fillStyle = "#f3f8f6";
   ctx.font = "32px sans-serif";
   ctx.fillText(requester, 30, 136, 708);
   ctx.fillStyle = "#b6cac2";
   ctx.font = "26px sans-serif";
-  ctx.fillText("Candidate · double-tap to inspect", 30, 200, 708);
+  ctx.fillText(detection.subtitle || "Candidate · double-tap to inspect", 30, 200, 708);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(
@@ -49,6 +51,8 @@ export default function ARScene({
   onPick,
   onActive,
   onAnchored,
+  automatic = false,
+  paused = false,
 }) {
   const host = useRef(null),
     engine = useRef(null),
@@ -58,13 +62,13 @@ export default function ARScene({
   );
   const [active, setActive] = useState(false);
   useEffect(() => {
-    callbacks.current = { onCapture, onPick, onActive, onAnchored };
-  }, [onCapture, onPick, onActive, onAnchored]);
+    callbacks.current = { onCapture, onPick, onActive, onAnchored, automatic, paused };
+  }, [onCapture, onPick, onActive, onAnchored, automatic, paused]);
   useImperativeHandle(
     ref,
     () => ({
       capture: () => engine.current?.capture(),
-      place: (detections, items) => engine.current?.place(detections, items),
+      place: (detections, items, pose) => engine.current?.place(detections, items, pose),
       end: () => engine.current?.end(),
       clear: () => engine.current?.clear(),
       remove: (prompt) => engine.current?.remove(prompt),
@@ -79,6 +83,8 @@ export default function ARScene({
       captured = null,
       requested = false,
       version = 0;
+    let captureBusy = false, nextCapture = 0;
+    let handWorker=null, handReader=null, handsReady=false, handsBusy=false, nextHands=0, gestureState=null;
     let pending = [],
       anchors = [];
     const scene = new THREE.Scene(),
@@ -117,6 +123,9 @@ export default function ARScene({
       binding = null;
       captured = null;
       requested = false;
+      captureBusy = false;
+      handWorker?.terminate(); handWorker=null; handReader?.dispose();handReader=null;
+      handsReady=false; handsBusy=false; gestureState=null;
       if (framebuffer) renderer.getContext().deleteFramebuffer(framebuffer);
       framebuffer = null;
       if (!disposed) {
@@ -152,9 +161,33 @@ export default function ARScene({
           space = await session.requestReferenceSpace("local");
           binding = new XRWebGLBinding(session, renderer.getContext());
           framebuffer = renderer.getContext().createFramebuffer();
+          if(callbacks.current?.automatic) {
+            handReader=createHandReader(renderer.getContext());
+            handWorker=new Worker('/hand-worker.js');
+            handWorker.onmessage=({data})=>{
+              if(data.type==='ready') handsReady=true;
+              if(data.type==='error' || data.type==='inference-error') {handsReady=false;handsBusy=false;}
+              if(data.type!=='hands') return;
+              handsBusy=false;
+              if(performance.now()-data.time>700 || !renderer.xr.isPresenting) return;
+              const xrCamera=renderer.xr.getCamera();
+              const cards=anchors.filter((a)=>a.object.visible).map((a)=>{
+                const pos=a.object.children[0].getWorldPosition(new THREE.Vector3()).project(xrCamera);
+                return {id:a.object.uuid,scale:a.targetScale||1,box:[(pos.x+1)/2-0.12,(1-pos.y)/2-0.065,0.24,0.13]};
+              });
+              const pointer=(data.landmarks || []).map(handPointer).find((p)=>p && cards.some((c)=>p.x>=c.box[0]&&p.x<=c.box[0]+c.box[2]&&p.y>=c.box[1]&&p.y<=c.box[1]+c.box[3]));
+              const update=resizeGesture(gestureState,pointer,cards,performance.now());
+              gestureState=update.state;
+              const anchor=anchors.find((a)=>a.object.uuid===update.id);
+              if(anchor) anchor.targetScale=update.scale;
+            };
+            handWorker.onerror=()=>{handsReady=false;handsBusy=false;};
+            handWorker.postMessage({type:'init',base:location.origin});
+          }
           setActive(true);
           callbacks.current?.onActive(true);
-          setStatus("Move slowly to map the shelf, then scan.");
+          nextCapture = performance.now() + 1200;
+          setStatus("Move slowly to map the shelf. Recognition runs automatically.");
         } catch (e) {
           setStatus(e.message);
           await renderer.xr.getSession()?.end();
@@ -168,10 +201,14 @@ export default function ARScene({
         requested = true;
         setStatus("Capturing shelf…");
       },
-      async place(detections, items) {
-        clear();
+      async place(detections, items, capturePose) {
+        if (!callbacks.current?.automatic) clear();
+        else {
+          pending.forEach((p) => p.source.cancel());
+          pending = [];
+        }
         const current = version,
-          pose = captured,
+          pose = capturePose || captured,
           session = renderer.xr.getSession();
         if (!pose || !session || pose.session !== session) {
           setStatus("Start AR and scan again to anchor these candidates.");
@@ -204,10 +241,10 @@ export default function ARScene({
             const names = [
               ...new Set(
                 items
-                  .filter((i) => i.item === d.prompt)
+                  .filter((i) => d.matched_item_ids ? d.matched_item_ids.includes(i.id) : i.item === d.prompt)
                   .map((i) => (i.shared ? "Household" : i.requester)),
               ),
-            ].join(", ");
+            ].join(", ") || (d.matched_item_ids ? "Not on this aisle's list" : "");
             pending.push({
               source,
               d,
@@ -243,6 +280,22 @@ export default function ARScene({
     renderer.xr.addEventListener("sessionend", ended);
     renderer.setAnimationLoop((_, frame) => {
       if (frame && space) {
+        if(handsReady && !handsBusy && performance.now()>nextHands && !callbacks.current?.paused) {
+          const view=frame.getViewerPose(space)?.views.find((v)=>v.camera);
+          if(view && binding && handReader) {
+            try {
+              const pixels=handReader.read(binding.getCameraImage(view.camera),view.camera.width,view.camera.height);
+              handsBusy=true;nextHands=performance.now()+200;
+              const time=performance.now(), worker=handWorker;
+              createImageBitmap(pixels).then((image)=>{
+                if(disposed || worker!==handWorker) image.close();
+                else worker.postMessage({type:'frame',image,time},[image]);
+              }).catch(()=>{handsBusy=false;});
+            } catch {handsReady=false;}
+          }
+        }
+        if (callbacks.current?.automatic && !callbacks.current.paused && !captureBusy &&
+            performance.now() >= nextCapture && !document.hidden) requested = true;
         if (requested && binding) {
           try {
             const pose = frame.getViewerPose(space),
@@ -263,10 +316,17 @@ export default function ARScene({
                 projection: Array.from(view.projectionMatrix),
                 transform: Array.from(view.transform.matrix),
               };
-              callbacks.current?.onCapture(
-                cameraPixelsToJpeg(pixels, width, height),
-              );
-              setStatus("Shelf captured. Finding your list…");
+              captureBusy = true;
+              const captureSession = captured.session;
+              Promise.resolve(callbacks.current?.onCapture(
+                cameraPixelsToJpeg(pixels, width, height), captured,
+              )).catch(() => {}).finally(() => {
+                if (renderer.xr.getSession() === captureSession) {
+                  captureBusy = false;
+                  nextCapture = performance.now() + 3500;
+                }
+              });
+              setStatus("Recognising aisle products · existing labels stay anchored");
             }
           } catch (e) {
             requested = false;
@@ -281,6 +341,25 @@ export default function ARScene({
             /* session may be ending */
           }
           if (hits.length) {
+            const hitPose = hits[0].getPose(space);
+            const position = hitPose && new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().fromArray(hitPose.transform.matrix));
+            const nearby = position && anchors.find((a) =>
+              a.prompt === p.d.prompt && a.object.visible &&
+              new THREE.Vector3().setFromMatrixPosition(a.object.matrix).distanceTo(position) < 0.12);
+            if (callbacks.current?.automatic && nearby) {
+              const updated = label(p.d, p.names);
+              updated.matrix.copy(nearby.object.matrix);
+              updated.scale.copy(nearby.object.scale);
+              scene.remove(nearby.object);
+              disposeObject(nearby.object);
+              nearby.object = updated;
+              nearby.prompt = p.d.prompt;
+              nearby.seen = performance.now();
+              scene.add(updated);
+              p.source.cancel();
+              pending = pending.filter((v) => v !== p);
+              continue;
+            }
             const promise = hits[0].createAnchor();
             p.source.cancel();
             pending = pending.filter((v) => v !== p);
@@ -293,7 +372,7 @@ export default function ARScene({
                 const object = label(p.d, p.names);
                 object.visible = false;
                 scene.add(object);
-                anchors.push({ anchor, object, prompt: p.d.prompt });
+                anchors.push({ anchor, object, prompt: p.d.prompt, seen: performance.now() });
                 callbacks.current?.onAnchored?.();
                 setStatus(
                   `${anchors.length} shelf labels anchored · double-tap a label`,
@@ -317,6 +396,14 @@ export default function ARScene({
           const pose = frame.getPose(a.anchor.anchorSpace, space);
           a.object.visible = !!pose;
           if (pose) a.object.matrix.fromArray(pose.transform.matrix);
+          const sprite=a.object.children[0], scale=sprite.scale.x/0.36;
+          const nextScale=scale+((a.targetScale||1)-scale)*0.15;
+          sprite.scale.set(0.36*nextScale,0.12*nextScale,1);
+        }
+        if (callbacks.current?.automatic) {
+          const expired = anchors.filter((a) => performance.now() - a.seen > 15000);
+          expired.forEach((a) => { a.anchor.delete(); scene.remove(a.object); disposeObject(a.object); });
+          anchors = anchors.filter((a) => !expired.includes(a));
         }
       }
       renderer.render(scene, camera);
@@ -345,8 +432,9 @@ export default function ARScene({
       const detection = hit?.object.userData.detection;
       if (!detection) return;
       if (
-        lastId === detection.detection_id &&
+        callbacks.current?.automatic || (lastId === detection.detection_id &&
         performance.now() - lastTap < 500
+        )
       )
         callbacks.current?.onPick(detection);
       lastId = detection.detection_id;
@@ -362,6 +450,7 @@ export default function ARScene({
     addEventListener("resize", resize);
     return () => {
       disposed = true;
+      handWorker?.terminate();handReader?.dispose();handReader=null;
       clear();
       renderer.setAnimationLoop(null);
       renderer.xr

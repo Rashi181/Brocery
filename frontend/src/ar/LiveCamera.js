@@ -1,5 +1,7 @@
 import { api } from "../api";
 import { grayscale } from "./localTracker";
+import { productPrompt, readingBox } from "./productPrompts";
+import { orderReads } from "./readQueue";
 import {
   clamp,
   contains,
@@ -19,6 +21,7 @@ export class LiveCamera {
     this.items = [];
     this.tracks = [];
     this.readings = new Map();
+    this.identities = new Map();
     this.scales = new Map();
     this.sequence = 0;
     this.controllers = new Set();
@@ -43,6 +46,8 @@ export class LiveCamera {
       this.trackingBusy = false;
       this.tracks = data.tracks;
       const ids = new Set(this.tracks.map((t) => t.id));
+      for (const id of this.identities.keys())
+        if (!ids.has(id)) this.identities.delete(id);
       for (const id of this.readings.keys())
         if (!ids.has(id)) {
           this.readings.delete(id);
@@ -95,6 +100,7 @@ export class LiveCamera {
         this.trackWorker.postMessage({ type: "reset" });
         this.tracks = [];
         this.readings.clear();
+        this.identities.clear();
         this.trackingBusy = false;
         this.gestureState = null;
         this.cb.pointer(null);
@@ -174,6 +180,8 @@ export class LiveCamera {
         ...t,
         visualBox: t.displayBox || t.box,
         reading: this.readings.get(t.id),
+        identity: !t.lost && this.identities.get(t.id)?.generation === t.generation
+          ? this.identities.get(t.id) : null,
         scale: this.scales.get(t.id) || 1,
         held: this.heldId === t.id,
         resizing: this.gestureState?.locked && this.gestureState.id === t.id,
@@ -303,6 +311,16 @@ export class LiveCamera {
         (morePrompts && now - (this.lastDetected || 0) > 25000))
     )
       this.detect(scene);
+    if (!this.identifying && now >= (this.nextIdentify || 0)) {
+      const candidates = this.tracks.filter((t) => {
+        const old = this.identities.get(t.id);
+        return !t.lost && t.sharp >= 9 && now - t.stableSince > 350 &&
+          (!old || old.generation !== t.generation ||
+            (!old.data && now - old.attemptedAt > 15000));
+      });
+      const next = orderReads(candidates, this.identities, this.heldId)[0];
+      if (next) this.identify(next);
+    }
     if (!this.reading && now >= this.nextRead) {
       const candidates = this.tracks
         .filter((t) => {
@@ -319,11 +337,9 @@ export class LiveCamera {
                   old.failed ||
                   difference(t.signature, old.signature) > 0.1)))
           );
-        })
-        .sort(
-          (a, b) => Number(b.id === this.heldId) - Number(a.id === this.heldId),
-        );
-      if (candidates[0]) this.observe(candidates[0]);
+        });
+      const next = orderReads(candidates, this.readings, this.heldId)[0];
+      if (next) this.observe(next);
     }
   }
   photo(box = [0, 0, 1, 1], max = 1600) {
@@ -352,6 +368,35 @@ export class LiveCamera {
     );
     return c.toDataURL("image/jpeg", 0.9);
   }
+  async identify(track) {
+    this.identifying = true;
+    const sequence = (this.identitySequence = (this.identitySequence || 0) + 1);
+    const record = {generation: track.generation, attemptedAt: performance.now(), pending: true};
+    this.identities.set(track.id, record);
+    const {control, signal} = this.requestSignal(35000);
+    try {
+      const data = await this.api.identify({
+        trip_id: this.tripId, track_id: track.id, sequence,
+        item_ids: this.items.slice(0, 12).map((i) => i.id),
+        image_b64: this.photo(readingBox(track.box), 960),
+      }, signal);
+      const current = this.tracks.find((t) => t.id === track.id);
+      if (this.closed || !current || current.generation !== track.generation ||
+          data.track_id !== track.id || data.sequence !== sequence) return;
+      record.data = data.category === "unknown" ? null : data;
+      record.message = record.data ? "" : "Show the front label · name not readable yet";
+      this.identityErrors = 0;
+    } catch (e) {
+      this.identityErrors = Math.min(4, (this.identityErrors || 0) + 1);
+      record.message = e.name === "TimeoutError" ? "Identification timed out · retrying" : e.message;
+    } finally {
+      record.pending = false;
+      this.identifying = false;
+      this.controllers.delete(control);
+      this.nextIdentify = performance.now() + Math.min(60000, 1500 * 2 ** (this.identityErrors || 0));
+      if (!this.closed) this.publish();
+    }
+  }
   requestSignal(timeout) {
     const control = new AbortController();
     this.controllers.add(control);
@@ -367,7 +412,7 @@ export class LiveCamera {
     );
     const sequence = this.sequence,
       photo = this.photo(undefined, 960);
-    const names = [...new Set(this.items.map((i) => i.item))];
+    const names = [...new Set(this.items.map((i) => productPrompt(i.item)))];
     // Rotate long aisle lists instead of permanently excluding items after the first six.
     const offset = (this.promptOffset || 0) % names.length;
     const prompts = [...names.slice(offset), ...names.slice(0, offset)].slice(
@@ -376,12 +421,12 @@ export class LiveCamera {
     );
     this.promptOffset = offset + 5;
     if (
-      (this.emptyScans || 0) >= 2 &&
       this.items.some((i) =>
         /chips|oreo|snack|cracker|cookie|cheetos/i.test(i.item),
       )
     )
-      prompts.push("food package");
+      prompts.push(...["bag of chips", "cookie package", "cracker package", "food package"]
+        .filter((p) => !prompts.includes(p)).slice(0, 6 - prompts.length));
     const { control, signal } = this.requestSignal(100000);
     try {
       const data = await this.api.detect(this.tripId, photo, prompts, signal);
@@ -425,25 +470,27 @@ export class LiveCamera {
   async observe(track) {
     this.reading = true;
     const old = this.readings.get(track.id);
-    const image = this.photo(track.box);
+    const image = this.photo(readingBox(track.box));
     const front = old?.reference;
     const sequence = (this.readSequence = (this.readSequence || 0) + 1);
     const relevant = [...this.items]
       .sort(
         (a, b) =>
-          Number(track.prompts.includes(b.item)) -
-          Number(track.prompts.includes(a.item)),
+          Number(track.prompts.includes(productPrompt(b.item))) -
+          Number(track.prompts.includes(productPrompt(a.item))),
       )
       .slice(0, 12);
     const ids = relevant.map((i) => i.id);
     this.readings.set(track.id, {
       ...old,
+      attemptedAt: performance.now(),
+      message: "Reading packaging…",
       pending: true,
       pendingSequence: sequence,
       time: performance.now(),
       signature: track.signature,
     });
-    this.cb.status("Reading packaging automatically · keep the label visible");
+    this.cb.status("Category detected · reading visible ingredient text in background");
     const { control, signal } = this.requestSignal(80000);
     try {
       const data = await this.api.observe(
@@ -459,19 +506,30 @@ export class LiveCamera {
         signal,
       );
       // Track lifetimes are never reused. A response for a lost object is discarded.
+      const current = this.tracks.find((t) => t.id === track.id);
       if (
         this.closed ||
-        !this.tracks.some(
-          (t) => t.id === track.id && t.generation === track.generation,
-        ) ||
+        !current || current.generation !== track.generation ||
         data.track_id !== track.id ||
         data.sequence !== sequence
-      )
+      ) {
+        if (!this.closed) {
+          console.info("[live-read] discarded", {
+            track: track.id,
+            reason: !current ? "track removed" : current.generation !== track.generation
+              ? "tracking identity changed during read" : "response mismatch",
+          });
+          const pending = this.readings.get(track.id);
+          if (pending) pending.message = "Tracking changed during reading · retrying";
+          this.cb.status("Tracking changed during reading · automatically retrying");
+        }
         return;
+      }
       const identityLost =
         (front || old?.evidence) && data.same_product !== "yes";
       this.readings.set(track.id, {
         data,
+        attemptedAt: this.readings.get(track.id)?.attemptedAt,
         pending: false,
         image,
         time: performance.now(),
@@ -498,6 +556,8 @@ export class LiveCamera {
         if (this.tracks.some((t) => t.id === track.id))
           this.readings.set(track.id, {
             ...old,
+            attemptedAt: this.readings.get(track.id)?.attemptedAt,
+            message: "Product reading failed · automatically retrying",
             pending: false,
             failed: true,
             time: performance.now(),

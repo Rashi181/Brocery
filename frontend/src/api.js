@@ -28,6 +28,12 @@ const post = (path, body) =>
   req(path, { method: "POST", body: JSON.stringify(body) });
 
 export const api = {
+  scene: (body, signal) => req("/product/scene", {
+    method: "POST", body: JSON.stringify(body), signal,
+  }),
+  identify: (body, signal) => req("/product/identify", {
+    method: "POST", body: JSON.stringify(body), signal,
+  }),
   observe: (body, signal) =>
     req("/product/observe", {
       method: "POST",

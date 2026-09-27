@@ -63,6 +63,10 @@ document.getElementById("run").onclick = () => {
   paint();
   const interval = setInterval(paint, 80);
   const services = {
+    identify: async (body) => ({track_id: body.track_id, sequence: body.sequence,
+      name: body.track_id.endsWith("1") ? "Chips" : "Oreo cookies",
+      category: body.track_id.endsWith("1") ? "chips" : "cookies",
+      matched_item_ids: [body.track_id.endsWith("1") ? "chips" : "oreo"], visible_name: "Synthetic fixture"}),
     detect: async () => ({
       detections: [
         { prompt: "chips", bbox: [40 / 480, 250 / 720, 165 / 480, 275 / 720] },

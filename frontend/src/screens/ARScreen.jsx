@@ -4,16 +4,7 @@ import { useStore } from "../store";
 import BudgetBar from "../components/BudgetBar";
 import DecisionCard from "../components/DecisionCard";
 import { LiveCamera } from "../ar/LiveCamera";
-
-function initialChecks(item) {
-  return [
-    item.spec,
-    ...(item.avoid || []).map((a) => `Avoid ${a}`),
-    item.max_price != null
-      ? `Under $${item.max_price.toFixed(2)} each`
-      : "Price not yet read",
-  ].filter(Boolean);
-}
+import { productCard } from "../ar/productCard";
 
 const createCamera = (...args) => new LiveCamera(...args);
 export default function ARScreen({ mode, createEngine = createCamera }) {
@@ -134,27 +125,20 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
           />
           {tracks.map((track, index) => {
             const reading = track.reading;
+            const identity = track.identity;
+            const recognised = identity?.data;
             const data =
               track.needsIdentity || track.lost ? null : reading?.data;
             const box = track.visualBox || track.box;
-            const assessments =
-              data?.assessments.filter((a) =>
-                items.some((i) => i.id === a.item_id),
-              ) || [];
-            const matches = assessments.filter((a) => a.identity === "pass");
-            const pending = items.filter((i) => track.prompts.includes(i.item));
-            const shown = matches.length
-              ? matches
-              : assessments.filter((a) => a.identity !== "fail");
+            const card = productCard(recognised, data, items);
+            const shown = card.shown;
+            const matches = shown;
             const expanded = track.scale > 1.22;
             const compact = !!focusId && focusId !== track.id;
             const title =
-              data?.product_name ||
               (track.lost
                 ? "Reacquiring…"
-                : reading?.pending
-                  ? "Reading packet…"
-                  : "Product candidate");
+                : card.title);
             const lane = track.slot ?? index % 2;
             const baseWidth = Math.min(210, (size.width - 24) / 2);
             const cardWidth = Math.max(
@@ -217,7 +201,7 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                       ? "78%"
                       : compact
                         ? "80px"
-                        : data
+                        : shown.length
                           ? "42%"
                           : "112px",
                     opacity: track.lost ? 0.4 : 1,
@@ -225,26 +209,29 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                   aria-label={`${title} live details`}
                 >
                   <div className="live-card-top">
-                    <span>{track.held ? "IN HAND" : "LIVE CHECK"}</span>
+                    <span>{track.held ? "IN HAND" : (recognised ? "PRODUCT IDENTIFIED" : "FINDING PRODUCT")}</span>
                     <span>
                       {track.resizing
                         ? "↔ RESIZING"
                         : reading?.pending
-                          ? "READING…"
+                          ? "TEXT…"
                           : "◉"}
                     </span>
                   </div>
                   <strong className="live-product-name">{title}</strong>
+                  {recognised && <small>{recognised.category}</small>}
+                  {identity?.pending && <small>Identifying product…</small>}
+                  {identity?.message && <small role="status">{identity.message}</small>}
                   {track.needsIdentity && (
-                    <p>Checking identity after movement…</p>
+                    <small>Previous ingredient checks cleared after movement.</small>
                   )}
-                  {!matches.length && (
+                  {recognised && shown.length > 0 && (
                     <small>
                       {data
                         ? "Request match not yet verified"
                         : reading?.pending
-                          ? "Checking your list…"
-                          : "Waiting for a steady view"}
+                          ? "Reading visible text in background"
+                          : "Show ingredients to check requirements"}
                     </small>
                   )}
                   {!compact &&
@@ -253,7 +240,7 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                       return (
                         <section key={a.item_id} className="live-request">
                           <b>
-                            {a.identity === "pass" ? "For" : "Checking for"}{" "}
+                            For{" "}
                             {item.shared ? "the household" : item.requester}
                           </b>
                           <small>
@@ -291,34 +278,15 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                               setDecision({
                                 item,
                                 result: a.result,
-                                image: reading.image,
+                                  image: reading?.image || engine.current?.photo(track.box),
                               })
                             }
                           >
-                            Add / decide
+                            Add to cart
                           </button>
                         </section>
                       );
                     })}
-                  {expanded &&
-                    !compact &&
-                    !data &&
-                    pending.map((i) => (
-                      <section className="live-request" key={i.id}>
-                        <b>Checking for {i.requester}</b>
-                        <small>{i.item}</small>
-                        <ul>
-                          {initialChecks(i)
-                            .slice(0, expanded ? 100 : 3)
-                            .map((c, j) => (
-                              <li className="warn" key={j}>
-                                <span>?</span>
-                                {c}
-                              </li>
-                            ))}
-                        </ul>
-                      </section>
-                    ))}
                   {compact && (
                     <small>
                       {matches
@@ -329,8 +297,8 @@ export default function ARScreen({ mode, createEngine = createCamera }) {
                         .join(" · ") || "Checking…"}
                     </small>
                   )}
-                  {data && !shown.length && (
-                    <p>This product does not match the aisle requests.</p>
+                  {card.outside && (
+                    <p>Not on your list for this aisle.</p>
                   )}
                   {expanded && data && (
                     <section className="live-evidence">
