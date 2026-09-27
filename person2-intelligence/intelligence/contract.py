@@ -10,6 +10,7 @@ people, cite messages that don't exist, or return the same item twice.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Optional
 
@@ -179,24 +180,37 @@ def to_spec_response(contract: Contract) -> ChatParseResponse:
 async def parse_chat(
     raw_text: str, *, llm, store_: PreferenceStore, window_days: Optional[int] = None
 ) -> Contract:
+    # An export is often uploaded twice while the runner checks the draft.
+    # Reuse the already-validated in-process contract instead of paying for a
+    # second Muse call. Include the window setting because it changes input.
+    cache_key = hashlib.sha256(
+        f"window={window_days!r}\0{raw_text}".encode("utf-8")
+    ).hexdigest()
+    cached = store.get_cached_chat(cache_key)
+    if cached is not None:
+        return cached
+
     messages = recent_window(parse_whatsapp(raw_text), window_days)
     people = get_participants(messages)
     if not people:
         raise ContractError("Chat has no messages from people (only system lines).")
 
-    known = {p: [f.fact for f in await store_.for_person(p, limit=6)] for p in people}
     # Keep the full recent transcript for evidence validation and reviewer
-    # display, but send Muse only locally-selected discussion windows.
+    # display, but send Muse only locally-selected discussion windows. Do not
+    # query Backboard here: that used to add one serial network round-trip per
+    # chat participant before Muse could start. Product analysis reads the
+    # same preference store later, for the actual requester and item.
     relevant_messages = select_relevant_windows(messages)
     raw = await llm.json_call(
         task="parse_chat",
         system=prompts.PARSE_CHAT_SYSTEM,
-        text=prompts.parse_chat_user(render_for_llm(relevant_messages), people, known),
+        text=prompts.parse_chat_user(render_for_llm(relevant_messages), people, {}),
         out_model=LLMContract,
         context={"messages": relevant_messages},
     )
     contract = clean_contract(raw, messages, store.new_contract_id())
     store.put_contract(contract)
+    store.cache_chat(cache_key, contract)
 
     from .preferences import PreferenceFact
 

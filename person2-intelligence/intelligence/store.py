@@ -28,6 +28,7 @@ from .schemas import Contract, ContractItem, Detection
 
 _contracts: dict[str, Contract] = {}
 _items: dict[str, ContractItem] = {}
+_chat_cache: dict[str, Contract] = {}
 _last_detections: tuple[float, list[Detection]] = (0.0, [])
 DETECTION_TTL_SECONDS = 120  # a shelf scan is only trustworthy for ~2 minutes
 
@@ -54,6 +55,14 @@ def get_item(item_id: str) -> ContractItem | None:
     return _items.get(item_id)
 
 
+def get_cached_chat(key: str) -> Contract | None:
+    return _chat_cache.get(key)
+
+
+def cache_chat(key: str, contract: Contract) -> None:
+    _chat_cache[key] = contract
+
+
 def record_detections(detections: list[Detection]) -> None:
     global _last_detections
     _last_detections = (time.time(), detections)
@@ -71,4 +80,5 @@ def reset() -> None:
     global _last_detections
     _contracts.clear()
     _items.clear()
+    _chat_cache.clear()
     _last_detections = (0.0, [])

@@ -11,6 +11,7 @@ from intelligence.contract import (
     to_spec_response,
 )
 from intelligence.mocks import MockLLM
+from intelligence.preferences import LocalPreferenceStore
 from intelligence.schemas import LLMContract, LLMItem, LLMPreference
 from intelligence.whatsapp import parse_whatsapp
 
@@ -111,6 +112,32 @@ def test_full_mock_parse(sample_text, store):
     assert (
         item_store.get_item(c.items[0].id) is not None
     )  # registered for later /product/analyze
+
+
+def test_parse_does_not_block_on_historical_preference_lookups(sample_text, tmp_path):
+    class NoLookupStore(LocalPreferenceStore):
+        async def for_person(self, *args, **kwargs):
+            raise AssertionError("chat parsing must not query preferences before Muse")
+
+    store = NoLookupStore(tmp_path / "prefs.json")
+    contract = asyncio.run(parse_chat(sample_text, llm=MockLLM(), store_=store))
+    assert len(contract.items) == 8
+
+
+def test_identical_chat_reuses_cached_contract(sample_text, store):
+    class CountingLLM(MockLLM):
+        def __init__(self):
+            self.calls = 0
+
+        async def json_call(self, **kwargs):
+            self.calls += 1
+            return await super().json_call(**kwargs)
+
+    llm = CountingLLM()
+    first = asyncio.run(parse_chat(sample_text, llm=llm, store_=store))
+    second = asyncio.run(parse_chat(sample_text, llm=llm, store_=store))
+    assert second is first
+    assert llm.calls == 1
 
 
 def test_spec_response_shape_exact_keys(sample_text, store):
