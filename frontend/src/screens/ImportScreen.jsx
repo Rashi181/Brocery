@@ -29,52 +29,55 @@ export default function ImportScreen() {
     }
   }
 
-  return (
-    <div className="min-h-dvh bg-neutral-950 text-white px-5 py-8">
-      <div className="max-w-xl mx-auto">
-        <div className="eyebrow">ACCESSCART · YOUR HOUSEHOLD, IN SYNC</div>
-        <h1 className="text-2xl font-semibold mb-1">Import your group chat</h1>
-        <p className="text-sm text-white/50 mb-6">
-          Export the thread from WhatsApp and paste it here. Everything the
-          household asked for gets pulled out automatically.
-        </p>
+  const lineCount = text.trim() ? text.trim().split("\n").length : 0;
 
+  return (
+    <div className="page">
+      <p className="eyebrow">AccessCart</p>
+      <h1>What does everyone need from the store?</h1>
+      <p className="muted">
+        Export the household chat from WhatsApp and drop it in below. Every
+        item, restriction and budget gets pulled out automatically.
+      </p>
+
+      <div className="panel" style={{ marginTop: 18, padding: "18px 20px" }}>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <label style={{ margin: 0 }}>Pasted chat</label>
+          <small className="muted">
+            {lineCount ? `${lineCount} lines` : "waiting for text"}
+          </small>
+        </div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Paste the exported chat..."
-          className="w-full h-64 bg-neutral-900 border border-white/10 rounded-xl
-                     p-4 text-sm font-mono resize-none outline-none
-                     focus:border-white/30"
+          placeholder={
+            "9/26, 1:00 PM - Priya: can you grab oat milk\n9/26, 1:02 PM - Alex: yellow rubber duck for the kid, must be yellow"
+          }
+          rows={8}
+          style={{ marginTop: 8 }}
         />
+      </div>
 
-        <div className="flex gap-3 mt-3 text-sm">
-          <label
-            className="px-3 py-2 rounded-lg bg-neutral-800 cursor-pointer
-                            hover:bg-neutral-700"
-          >
-            Upload .txt
-            <input type="file" accept=".txt" onChange={handleFile} hidden />
-          </label>
-          <button
-            onClick={() => setText(SAMPLE)}
-            className="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700"
-          >
-            Use sample
-          </button>
-        </div>
-
-        {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
-
-        <button
-          onClick={submit}
-          disabled={!text.trim() || loading}
-          className="w-full mt-6 py-3.5 rounded-xl bg-white text-black
-                     font-medium disabled:opacity-30"
-        >
-          {loading ? "Reading the chat..." : "Build the list"}
+      <div className="row" style={{ marginTop: 14 }}>
+        <label className="button grow" style={{ margin: 0, textAlign: "center" }}>
+          Upload .txt export
+          <input type="file" accept=".txt" onChange={handleFile} hidden />
+        </label>
+        <button className="grow" onClick={() => setText(SAMPLE)}>
+          Try a sample chat
         </button>
       </div>
+
+      {error && <p className="error">{error}</p>}
+
+      <button
+        onClick={submit}
+        disabled={!text.trim() || loading}
+        className="primary"
+        style={{ width: "100%", marginTop: 20, padding: "0.9rem" }}
+      >
+        {loading ? "Reading the chat…" : "Build the list"}
+      </button>
     </div>
   );
 }

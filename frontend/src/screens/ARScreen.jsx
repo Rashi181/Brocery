@@ -163,7 +163,7 @@ export default function ARScreen({ mode }) {
             ← Route
           </button>
           <span className="eyebrow">
-            AISLE {aisle?.aisle_no} / {aisle?.aisle}
+            Aisle {aisle?.aisle_no} · {aisle?.aisle}
           </span>
           <button
             onClick={async () => {
@@ -201,7 +201,7 @@ export default function ARScreen({ mode }) {
       <div className="ar-content">
         {!items.length && (
           <section className="panel">
-            <div className="eyebrow">AISLE COMPLETE</div>
+            <p className="eyebrow">Aisle complete</p>
             <h2>That’s everything here.</h2>
             <p>Review the basket or head to your next aisle.</p>
           </section>

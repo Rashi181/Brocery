@@ -34,7 +34,7 @@ export default function ReviewScreen() {
   }
   return (
     <main className="page pb-64">
-      <div className="eyebrow">01 / REVIEW THE REQUESTS</div>
+      <p className="eyebrow">Review the requests</p>
       <h1>{items.length} things. One good run.</h1>
       <p className="muted">
         Check what everyone meant before heading into the aisle. All amounts are
@@ -64,7 +64,9 @@ export default function ReviewScreen() {
             </button>
             <p>{it.spec || "No additional specifications"}</p>
             {!!it.avoid?.length && (
-              <p className="text-amber-200">Avoid: {it.avoid.join(", ")}</p>
+              <p className="badge preferred" style={{ display: "inline-block" }}>
+                Avoid: {it.avoid.join(", ")}
+              </p>
             )}
             <small className="muted">
               {it.max_price == null

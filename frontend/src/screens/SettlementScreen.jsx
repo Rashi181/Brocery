@@ -83,7 +83,9 @@ export default function SettlementScreen() {
   return (
     <main className="page">
       <button onClick={() => nav("/cart")}>← Basket</button>
-      <div className="eyebrow mt-6">04 / BACK TO THE HOUSEHOLD</div>
+      <p className="eyebrow" style={{ marginTop: 22 }}>
+        Back to the household
+      </p>
       <h1>A good run, shared.</h1>
       {error && (
         <p className="error" role="alert">
@@ -117,7 +119,7 @@ export default function SettlementScreen() {
             </p>
           )}
           <section className="panel mt-4">
-            <div className="eyebrow">TRIP SCORE</div>
+            <p className="eyebrow">Trip score</p>
             <div className="hero-number">{data.accuracy}%</div>
             <h2>Exact-match coverage</h2>
             <p className="muted">{data.score_rule}</p>

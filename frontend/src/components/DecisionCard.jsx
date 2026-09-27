@@ -75,10 +75,10 @@ export default function DecisionCard({
       >
         <span className="eyebrow">
           {result.match
-            ? "MATCH CHECKED"
+            ? "Match checked"
             : result.decision === "skip"
-              ? "STRICT REQUEST · CONFLICT"
-              : "YOUR DECISION NEEDED"}
+              ? "Strict request · conflict"
+              : "Your decision needed"}
         </span>
         <span>{expanded ? "−" : "+"}</span>
       </button>
