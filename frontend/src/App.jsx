@@ -4,6 +4,7 @@ import ImportScreen from "./screens/ImportScreen";
 import ReviewScreen from "./screens/ReviewScreen";
 import AislesScreen from "./screens/AislesScreen";
 const ARScreen = lazy(() => import("./screens/ARScreen"));
+const LegacyARScreen = lazy(() => import("./screens/LegacyARScreen"));
 import CartScreen from "./screens/CartScreen";
 import SettlementScreen from "./screens/SettlementScreen";
 import { api } from "./api";
@@ -41,6 +42,16 @@ export default function App() {
               fallback={<main className="page">Preparing camera…</main>}
             >
               <ARScreen mode={mode} />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/ar/anchors"
+          element={
+            <Suspense
+              fallback={<main className="page">Preparing anchors…</main>}
+            >
+              <LegacyARScreen mode={mode} />
             </Suspense>
           }
         />

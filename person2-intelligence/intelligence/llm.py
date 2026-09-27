@@ -72,6 +72,7 @@ class MuseLLM:
             api_key=settings.meta_api_key,
             base_url=settings.muse_base_url,
             timeout=settings.llm_timeout,
+            max_retries=0,
         )
         self.model = settings.muse_model
         self.effort = settings.muse_reasoning_effort

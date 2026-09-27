@@ -637,3 +637,211 @@ body:has(.ar-root) #root > .mode-banner {
   transform: none;
   width: min(240px, 70vw);
 }
+
+/* The video and overlays share an uncropped coordinate system in portrait/landscape. */
+.live-root {
+  position: fixed;
+  inset: 0;
+  background: #050b08;
+  color: #f2faf5;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.live-header {
+  padding: max(10px, env(safe-area-inset-top)) 12px 8px;
+  z-index: 30;
+  background: #09140ff2;
+  flex-shrink: 0;
+}
+.live-header .row {
+  margin-bottom: 8px;
+}
+.live-header button {
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.live-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+.live-view {
+  position: relative;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.live-view video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.live-object {
+  position: absolute;
+  border: 1px solid #92eebc99;
+  border-radius: 12px;
+  pointer-events: none;
+  transition:
+    left 0.1s linear,
+    top 0.1s linear,
+    width 0.1s linear,
+    height 0.1s linear;
+}
+.live-object.held {
+  border: 2px solid #b5ffd0;
+  box-shadow: 0 0 18px #61e8a526;
+}
+.live-card {
+  position: absolute;
+  background: #071910eb;
+  border: 1px solid #9beac077;
+  border-radius: 14px;
+  padding: 0.85em;
+  box-shadow: 0 8px 30px #0005;
+  overflow: auto;
+  scrollbar-width: thin;
+  line-height: 1.35;
+  transition:
+    left 0.12s linear,
+    top 0.12s linear,
+    border-color 0.15s;
+}
+.live-card.resizing {
+  border: 2px solid #ffe399;
+  box-shadow: 0 0 22px #ffe39955;
+}
+.live-card-top {
+  font-size: 0.62em;
+  letter-spacing: 0.08em;
+  color: #9ce9bc;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.live-product-name {
+  font-size: 1.18em;
+  display: block;
+  margin: 0.35em 0;
+}
+.live-card small {
+  font-size: 0.82em;
+  color: #b6cbbd;
+  display: block;
+}
+.live-request {
+  border-top: 1px solid #a5e4bb25;
+  margin-top: 0.65em;
+  padding-top: 0.6em;
+}
+.live-request b {
+  display: block;
+}
+.live-request ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.4em 0;
+}
+.live-request li {
+  display: flex;
+  gap: 0.4em;
+  margin: 0.3em 0;
+}
+.live-request li span {
+  font-weight: bold;
+  flex-shrink: 0;
+}
+.live-request .pass {
+  color: #9af0b9;
+}
+.live-request .fail {
+  color: #ffaaa5;
+}
+.live-request .warn {
+  color: #f2dba4;
+}
+.live-request button {
+  width: 100%;
+  margin-top: 0.4em;
+  padding: 0.5em;
+  font-size: 0.95em;
+  color: #ddffeb;
+  background: #1b5336;
+}
+.live-evidence {
+  border-top: 1px solid #ffffff26;
+  margin-top: 0.75em;
+  padding-top: 0.6em;
+}
+.live-evidence p {
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.live-pinch-hint {
+  margin-top: 0.8em;
+  opacity: 0.8;
+  font-size: 0.67em !important;
+}
+.live-pointer {
+  position: absolute;
+  z-index: 25;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #eafff0;
+  border-radius: 50%;
+  pointer-events: none;
+  background: #1d4c3155;
+}
+.live-pointer.locked {
+  border-color: #ffe399;
+  background: #ffe39955;
+}
+.live-footer {
+  flex-shrink: 0;
+  padding: 9px 14px max(10px, env(safe-area-inset-bottom));
+  z-index: 30;
+  background: #09140ff2;
+}
+.live-footer p {
+  font-size: 12px;
+  margin: 3px 0;
+}
+.live-footer small {
+  display: block;
+  color: #a8bcaf;
+  font-size: 10px;
+  margin-top: 4px;
+}
+.live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #86edb2;
+  margin-right: 7px;
+}
+.live-decision {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  z-index: 50;
+  background: #09140ff5;
+  padding: 18px;
+}
+.live-decision .decision {
+  max-width: 600px;
+  margin: 12px auto;
+}
+.live-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+body:has(.live-root) #root > .mode-banner {
+  display: none;
+}

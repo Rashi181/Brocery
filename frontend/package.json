@@ -11,11 +11,12 @@
     "test": "node --test src/ar/*.test.js"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.32",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.4",
-    "zustand": "^5.0.15",
-    "three": "^0.186.1"
+    "three": "^0.186.1",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

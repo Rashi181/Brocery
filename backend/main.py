@@ -462,3 +462,7 @@ def leaderboard():
     return {
         "runners": sorted(rows, key=lambda r: (-r["accuracy"], -r["runs"], r["name"]))
     }
+
+
+from live import install_live
+install_live(app, member_item=member_item, get_llm=get_llm, get_store=get_store, analyses=ANALYSES)

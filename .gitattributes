@@ -1,0 +1,2 @@
+# Preserve byte-for-byte provenance hashes for locally hosted model/runtime assets.
+frontend/public/mediapipe/* -text

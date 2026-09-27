@@ -1,373 +1,382 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "../store";
-import { api } from "../api";
 import BudgetBar from "../components/BudgetBar";
-import ARScene from "../ar/ARScene";
-import ScanCamera from "../components/ScanCamera";
-import HandCamera from "../components/HandCamera";
 import DecisionCard from "../components/DecisionCard";
-import { cropImage, fileImage } from "../ar/images";
+import { LiveCamera } from "../ar/LiveCamera";
+import { clamp } from "../ar/liveMath";
 
-export default function ARScreen({ mode }) {
+function initialChecks(item) {
+  return [
+    item.spec,
+    ...(item.avoid || []).map((a) => `Avoid ${a}`),
+    item.max_price != null
+      ? `Under $${item.max_price.toFixed(2)} each`
+      : "Price not yet read",
+  ].filter(Boolean);
+}
+
+const createCamera = (...args) => new LiveCamera(...args);
+export default function ARScreen({ mode, createEngine = createCamera }) {
   const nav = useNavigate(),
-    state = useStore(),
-    overlay = useRef(null),
-    xr = useRef(null),
-    operation = useRef(0);
+    state = useStore();
+  const video = useRef(null),
+    stage = useRef(null),
+    view = useRef(null),
+    engine = useRef(null),
+    cards = useRef(new Map());
   const aisle = state.aisles.find((a) => a.aisle_no === state.currentAisleNo);
-  const items =
-    aisle?.items.filter(
-      (i) => state.lines.find((l) => l.item_id === i.id)?.status === "pending",
-    ) || [];
-  const [selected, setSelected] = useState(null),
-    [active, setActive] = useState(false),
-    [scan, setScan] = useState(null),
-    [preview, setPreview] = useState(false);
-  const [camera, setCamera] = useState(false),
-    [hand, setHand] = useState(false),
-    [result, setResult] = useState(null),
-    [image, setImage] = useState(null),
-    [busy, setBusy] = useState(""),
-    [error, setError] = useState(""),
-    [notice, setNotice] = useState(""),
-    [highlight, setHighlight] = useState(null);
-  const item = items.find((i) => i.id === selected) || items[0];
-  useEffect(
-    () => () => {
-      operation.current++;
-    },
-    [],
+  const items = useMemo(
+    () =>
+      aisle?.items.filter(
+        (i) =>
+          state.lines.find((l) => l.item_id === i.id)?.status === "pending",
+      ) || [],
+    [aisle, state.lines],
   );
-  if (!state.tripId)
+  const [tracks, setTracks] = useState([]),
+    [status, setStatus] = useState("Opening live camera…");
+  const [gesture, setGesture] = useState(""),
+    [error, setError] = useState(""),
+    [pointer, setPointer] = useState(null);
+  const [aspect, setAspect] = useState(9 / 16),
+    [size, setSize] = useState({ width: 0, height: 0 });
+  const [decision, setDecision] = useState(null),
+    [notice, setNotice] = useState("");
+  const focusId = tracks
+    .filter((t) => t.scale > 1.22)
+    .sort((a, b) => b.scale - a.scale)[0]?.id;
+  const ordered = [...tracks].sort((a, b) => a.box[0] - b.box[0]);
+  const tripId = state.tripId;
+  useEffect(() => {
+    if (!tripId || !video.current) return;
+    const live = createEngine(video.current, tripId, {
+      tracks: setTracks,
+      status: setStatus,
+      gesture: setGesture,
+      error: setError,
+      pointer: setPointer,
+      ready: setAspect,
+      scroll: (id, delta) =>
+        cards.current.get(id)?.scrollBy({ top: delta, behavior: "instant" }),
+      cards: () => {
+        const bounds = view.current?.getBoundingClientRect();
+        if (!bounds?.width) return [];
+        return [...cards.current.entries()].flatMap(([id, el]) => {
+          if (!el) return [];
+          const r = el.getBoundingClientRect();
+          return [
+            {
+              id,
+              scale: live.scales.get(id) || 1,
+              box: [
+                (r.left - bounds.left) / bounds.width,
+                (r.top - bounds.top) / bounds.height,
+                r.width / bounds.width,
+                r.height / bounds.height,
+              ],
+            },
+          ];
+        });
+      },
+    });
+    engine.current = live;
+    live.start();
+    return () => {
+      live.close();
+      engine.current = null;
+    };
+  }, [tripId, state.currentAisleNo, createEngine]);
+  useEffect(() => {
+    engine.current?.setItems(items);
+  }, [items]);
+  useEffect(() => {
+    engine.current?.setPaused(!!decision);
+  }, [decision]);
+  useEffect(() => {
+    if (!stage.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      const w = Math.min(width, height * aspect);
+      setSize({ width: w, height: w / aspect });
+    });
+    observer.observe(stage.current);
+    return () => observer.disconnect();
+  }, [aspect]);
+  if (!tripId)
     return (
       <main className="page">
-        <h1>Start with your household list</h1>
+        <h1>Start with your shopping list</h1>
         <button onClick={() => nav("/")}>Import chat</button>
       </main>
     );
-  async function detect(photo) {
-    if (!items.length) return;
-    const token = ++operation.current;
-    setBusy("SAM is finding your list on this shelf…");
-    setError("");
-    setResult(null);
-    try {
-      const data = await api.detect(
-        state.tripId,
-        photo,
-        [...new Set(items.map((i) => i.item))].slice(0, 6),
-      );
-      if (token !== operation.current) return;
-      setScan({ ...data, image: photo });
-      setPreview(true);
-      xr.current?.place(data.detections, items);
-      if (!data.detections.length)
-        setNotice(
-          "No candidates found. Move closer, use more light, or open the product camera.",
-        );
-    } catch (e) {
-      if (token === operation.current) setError(e.message);
-    } finally {
-      if (token === operation.current) setBusy("");
-    }
-  }
-  async function inspect(photo, request = item) {
-    if (!request) return;
-    const token = ++operation.current;
-    setCamera(false);
-    setSelected(request.id);
-    setImage(photo);
-    setResult(null);
-    setBusy(`Muse is checking ${request.item} for ${request.requester}…`);
-    setError("");
-    try {
-      const data = await api.analyze(
-        state.tripId,
-        request.id,
-        photo,
-        scan?.scan_id,
-      );
-      if (token === operation.current) setResult(data);
-    } catch (e) {
-      if (token === operation.current) setError(e.message);
-    } finally {
-      if (token === operation.current) setBusy("");
-    }
-  }
-  async function pick(d) {
-    if (busy || !scan) return;
-    const request =
-      items.find((i) => i.id === selected && i.item === d.prompt) ||
-      items.find((i) => i.item === d.prompt);
-    if (!request) {
-      setNotice("Select a pending shopping request first.");
-      return;
-    }
-    try {
-      await inspect(await cropImage(scan.image, d.bbox), request);
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-  async function openCamera() {
-    try {
-      await xr.current?.end();
-      setResult(null);
-      setCamera(true);
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-  function done(message) {
-    setResult(null);
-    setPreview(false);
-    setNotice(message + ` · $${useStore.getState().remaining.toFixed(2)} left`);
-    if (
-      !useStore
-        .getState()
-        .lines.some((l) => l.status === "pending" && l.requested === item?.item)
-    )
-      xr.current?.remove(item?.item);
-    if (navigator.vibrate) navigator.vibrate(40);
-  }
-  async function upload(e) {
-    try {
-      const f = e.target.files?.[0];
-      if (f) await detect(await fileImage(f));
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      e.target.value = "";
-    }
-  }
   return (
-    <div ref={overlay} className={`ar-root ${active ? "active" : ""}`}>
-      <ARScene
-        ref={xr}
-        overlay={overlay}
-        onCapture={detect}
-        onPick={pick}
-        onActive={setActive}
-        onAnchored={() => setPreview(false)}
-      />
-      <header className="ar-top">
+    <main className="live-root">
+      <header className="live-header">
         {mode && <small className="notice">{mode}</small>}
         <div className="row justify-between">
-          <button
-            onClick={async () => {
-              await xr.current?.end();
-              nav("/aisles");
-            }}
-          >
-            ← Route
-          </button>
-          <span className="eyebrow">
-            AISLE {aisle?.aisle_no} / {aisle?.aisle}
-          </span>
-          <button
-            onClick={async () => {
-              await xr.current?.end();
-              nav("/cart");
-            }}
-          >
-            Basket
-          </button>
+          <button onClick={() => nav("/aisles")}>← Aisles</button>
+          <span className="eyebrow">{aisle?.aisle} · LIVE</span>
+          <button onClick={() => nav("/cart")}>Basket</button>
         </div>
         <BudgetBar compact />
       </header>
-      {!active &&
-        !camera &&
-        !hand &&
-        !result &&
-        !preview &&
-        !busy &&
-        !notice &&
-        !error &&
-        items.length > 0 && (
-          <div className="camera-intro">
-            <div className="viewfinder-symbol">⌖</div>
-            <h1>Your list, on the shelf.</h1>
-            <p>
-              Scan the shelf to find candidates. Open the product camera for
-              sharp labels and ingredient checks.
-            </p>
-            <small>
-              AR labels stay with stationary shelf surfaces. Product checks use
-              captured photos.
-            </small>
-          </div>
-        )}
-      <div className="ar-content">
-        {!items.length && (
-          <section className="panel">
-            <div className="eyebrow">AISLE COMPLETE</div>
-            <h2>That’s everything here.</h2>
-            <p>Review the basket or head to your next aisle.</p>
-          </section>
-        )}
-        {notice && (
-          <p className="toast" role="status" onClick={() => setNotice("")}>
-            {notice}
-          </p>
-        )}
+      <div ref={stage} className="live-stage">
+        <div
+          ref={view}
+          className="live-view"
+          style={size.width ? size : { width: "100%", height: "100%" }}
+        >
+          <video
+            ref={video}
+            autoPlay
+            playsInline
+            muted
+            aria-label="Live rear camera"
+          />
+          {tracks.map((track, index) => {
+            const reading = track.reading;
+            const data = track.needsIdentity ? null : reading?.data;
+            const assessments =
+              data?.assessments.filter((a) =>
+                items.some((i) => i.id === a.item_id),
+              ) || [];
+            const matches = assessments.filter((a) => a.identity === "pass");
+            const pending = items.filter((i) => track.prompts.includes(i.item));
+            const shown = matches.length
+              ? matches
+              : assessments.filter((a) => a.identity !== "fail");
+            const expanded = track.scale > 1.22;
+            const compact = !!focusId && focusId !== track.id;
+            const title = data?.product_name || "Identifying product…";
+            const lane = ordered.findIndex((t) => t.id === track.id);
+            const baseWidth =
+              tracks.length > 1 ? Math.min(210, (size.width - 24) / 2) : 210;
+            const cardWidth = Math.max(
+              100,
+              Math.min(
+                size.width - 16,
+                (expanded ? 210 : baseWidth) * track.scale,
+              ),
+            );
+            const left = expanded
+              ? Math.max(8, (size.width - cardWidth) / 2)
+              : lane % 2 === 0
+                ? 8
+                : Math.max(8, size.width - cardWidth - 8);
+            const top = expanded
+              ? 8
+              : compact
+                ? Math.max(8, size.height - 85)
+                : tracks.length > 2
+                  ? 8 + Math.floor(lane / 2) * size.height * 0.48
+                  : clamp(
+                      track.box[1] * size.height - 90,
+                      8,
+                      Math.max(8, size.height - 230),
+                    );
+            return (
+              <div key={track.id}>
+                <div
+                  className={`live-object ${track.held ? "held" : ""}`}
+                  style={{
+                    left: track.box[0] * 100 + "%",
+                    top: track.box[1] * 100 + "%",
+                    width: track.box[2] * 100 + "%",
+                    height: track.box[3] * 100 + "%",
+                  }}
+                />
+                <article
+                  ref={(el) => {
+                    if (el) cards.current.set(track.id, el);
+                    else cards.current.delete(track.id);
+                  }}
+                  className={`live-card ${track.resizing ? "resizing" : ""}`}
+                  style={{
+                    left,
+                    top,
+                    width: cardWidth,
+                    fontSize: `${12 * track.scale}px`,
+                    zIndex: track.resizing ? 20 : index + 2,
+                    maxHeight: expanded ? "78%" : compact ? "80px" : "48%",
+                  }}
+                  aria-label={`${title} live details`}
+                >
+                  <div className="live-card-top">
+                    <span>{track.held ? "IN HAND" : "LIVE CHECK"}</span>
+                    <span>
+                      {track.resizing
+                        ? "↔ RESIZING"
+                        : reading?.pending
+                          ? "READING…"
+                          : "◉"}
+                    </span>
+                  </div>
+                  <strong className="live-product-name">{title}</strong>
+                  {track.needsIdentity && (
+                    <p>Checking identity after movement…</p>
+                  )}
+                  {!matches.length && (
+                    <small>
+                      {data
+                        ? "Request match not yet verified"
+                        : "Checking against your list"}
+                    </small>
+                  )}
+                  {!compact &&
+                    shown.map((a) => {
+                      const item = items.find((i) => i.id === a.item_id);
+                      return (
+                        <section key={a.item_id} className="live-request">
+                          <b>
+                            {a.identity === "pass" ? "For" : "Checking for"}{" "}
+                            {item.shared ? "the household" : item.requester}
+                          </b>
+                          <small>
+                            {item.item} · {item.quantity}
+                          </small>
+                          <small>
+                            {a.result.price == null
+                              ? "Price not yet visible"
+                              : `Visible price $${a.result.price.toFixed(2)}`}
+                          </small>
+                          <ul>
+                            {a.result.checklist
+                              .slice(0, expanded ? 100 : 3)
+                              .map((c, i) => (
+                                <li key={i} className={c.status}>
+                                  <span>
+                                    {c.status === "pass"
+                                      ? "✓"
+                                      : c.status === "fail"
+                                        ? "✕"
+                                        : "?"}
+                                  </span>
+                                  {c.text}
+                                </li>
+                              ))}
+                          </ul>
+                          {!expanded && a.result.checklist.length > 3 && (
+                            <small>
+                              Spread fingers to see all{" "}
+                              {a.result.checklist.length} checks
+                            </small>
+                          )}
+                          <button
+                            onClick={() =>
+                              setDecision({
+                                item,
+                                result: a.result,
+                                image: reading.image,
+                              })
+                            }
+                          >
+                            Add / decide
+                          </button>
+                        </section>
+                      );
+                    })}
+                  {!compact &&
+                    !data &&
+                    pending.map((i) => (
+                      <section className="live-request" key={i.id}>
+                        <b>Checking for {i.requester}</b>
+                        <small>{i.item}</small>
+                        <ul>
+                          {initialChecks(i)
+                            .slice(0, expanded ? 100 : 3)
+                            .map((c, j) => (
+                              <li className="warn" key={j}>
+                                <span>?</span>
+                                {c}
+                              </li>
+                            ))}
+                        </ul>
+                      </section>
+                    ))}
+                  {compact && (
+                    <small>
+                      {matches
+                        .map(
+                          (a) =>
+                            items.find((i) => i.id === a.item_id)?.requester,
+                        )
+                        .join(" · ") || "Checking…"}
+                    </small>
+                  )}
+                  {data && !shown.length && (
+                    <p>This product does not match the aisle requests.</p>
+                  )}
+                  {expanded && data && (
+                    <section className="live-evidence">
+                      <b>Visible packaging text</b>
+                      <p>
+                        {data.visible_text ||
+                          "Not readable yet. Turn the label toward the camera."}
+                      </p>
+                      <small>Unreadable text stays unverified.</small>
+                    </section>
+                  )}
+                  <small className="live-pinch-hint">
+                    Pinch here in the air · spread to enlarge
+                  </small>
+                </article>
+              </div>
+            );
+          })}
+          {pointer && (
+            <div
+              className={`live-pointer ${pointer.locked ? "locked" : ""}`}
+              style={{
+                left: pointer.x * 100 + "%",
+                top: pointer.y * 100 + "%",
+              }}
+            />
+          )}
+        </div>
+      </div>
+      <footer className="live-footer">
+        {notice && <p role="status">{notice}</p>}
+        <p role="status">
+          <span className="live-dot" />
+          {items.length
+            ? status
+            : "Aisle complete · open your basket or the next aisle"}
+        </p>
         {error && (
-          <p className="error panel" role="alert">
+          <p role="alert" className="error">
             {error}
           </p>
         )}
-        {busy && (
-          <div className="panel progress" role="status">
-            <span className="spinner" />
-            {busy}
-            <small>Keep the phone steady. You can keep looking around.</small>
-          </div>
+        <small>{gesture}</small>
+        {!tracks.length && items.length > 0 && (
+          <small>
+            Point at the products. Hold packaging steady briefly for sharp text.
+          </small>
         )}
-        {preview && scan && !result && !busy && (
-          <section className="panel shelf-panel">
-            <div className="row justify-between">
-              <strong>{scan.detections.length} shelf candidates</strong>
-              <button onClick={() => setPreview(false)}>Hide</button>
-            </div>
-            <div className="shelf-photo">
-              <img src={scan.image} alt="Captured shelf" />
-              {scan.detections.map((d) => (
-                <button
-                  aria-label={`Inspect ${d.prompt}`}
-                  key={d.detection_id}
-                  onClick={() => pick(d)}
-                  className={`detection ${highlight === d.detection_id ? "highlight" : ""}`}
-                  style={{
-                    left: d.bbox[0] * 100 + "%",
-                    top: d.bbox[1] * 100 + "%",
-                    width: d.bbox[2] * 100 + "%",
-                    height: d.bbox[3] * 100 + "%",
-                  }}
-                >
-                  {d.mask && <img src={d.mask} alt="" />}
-                  <span>{d.prompt}</span>
-                </button>
-              ))}
-            </div>
-            <small>
-              Tap a candidate to check it. Detection alone does not verify a
-              match.
-            </small>
-          </section>
-        )}
-        {result && item && (
+      </footer>
+      {decision && (
+        <div
+          className="live-decision"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm basket item"
+        >
+          <button className="live-close" onClick={() => setDecision(null)}>
+            ← Back to live camera
+          </button>
           <DecisionCard
-            key={result.analysis_id}
-            item={item}
-            result={result}
-            image={image}
-            onDone={done}
-            onRetake={openCamera}
-            onAlternative={(alt) => {
-              setHighlight(alt.detection_id);
-              setResult(null);
-              setPreview(true);
+            key={decision.result.analysis_id}
+            {...decision}
+            live
+            onDone={(message) => {
+              setDecision(null);
+              setNotice(message);
             }}
+            onRetake={() => setDecision(null)}
           />
-        )}
-      </div>
-      {!camera && (
-        <footer className="ar-bottom">
-          <div className="item-strip">
-            {items.map((it) => (
-              <button
-                disabled={!!busy || !!result}
-                key={it.id}
-                className={it.id === item?.id ? "selected" : ""}
-                onClick={() => {
-                  setSelected(it.id);
-                  setResult(null);
-                }}
-              >
-                <strong>{it.item}</strong>
-                <small>
-                  {it.requester} · {it.rigidity}
-                </small>
-              </button>
-            ))}
-          </div>
-          {!items.length ? (
-            <button className="primary" onClick={() => nav("/cart")}>
-              Aisle complete · review basket
-            </button>
-          ) : (
-            <div className="row">
-              <button
-                className="primary grow"
-                disabled={!!busy}
-                onClick={() => (active ? xr.current?.capture() : openCamera())}
-              >
-                {active ? "Scan shelf" : "Product camera"}
-              </button>
-              {active && (
-                <button disabled={!!busy} onClick={openCamera}>
-                  Read label
-                </button>
-              )}
-              <label className="button">
-                Photo
-                <input
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  disabled={!!busy}
-                  onChange={upload}
-                />
-              </label>
-              <button
-                disabled={!!busy}
-                onClick={async () => {
-                  await xr.current?.end();
-                  setResult(null);
-                  setHand(true);
-                }}
-              >
-                In hand
-              </button>
-              <button
-                disabled={!!busy}
-                onClick={async () => {
-                  try {
-                    await state.skipItem(item.id, "Not found on this shelf");
-                    done(`Could not get ${item.item} for ${item.requester}`);
-                  } catch (e) {
-                    setError(e.message);
-                  }
-                }}
-              >
-                Not found
-              </button>
-              {scan && !preview && (
-                <button onClick={() => setPreview(true)}>Shelf</button>
-              )}
-            </div>
-          )}
-        </footer>
+        </div>
       )}
-      {hand && item && (
-        <HandCamera
-          item={item}
-          scanId={scan?.scan_id}
-          onClose={() => setHand(false)}
-          onDecision={(checked, photo) => {
-            setHand(false);
-            setResult(checked);
-            setImage(photo);
-          }}
-        />
-      )}
-      {camera && (
-        <ScanCamera
-          item={item}
-          onClose={() => setCamera(false)}
-          onCapture={inspect}
-        />
-      )}
-    </div>
+    </main>
   );
 }
