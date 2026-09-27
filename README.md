@@ -80,20 +80,6 @@ A live two-packet screenshot benchmark returned Doritos=chips (matching the chip
 - Local preference persistence; optional existing Meta Backboard integration through `PREF_MODE=backboard`, `BACKBOARD_API_KEY`, `BACKBOARD_ASSISTANT_ID`.
 - Transparent exact-match score, persistent runner leaderboard, itemized text/PNG export and corrections. No fabricated leaderboard entries.
 
-## Practical limits
-
-- The catalog/aisle layout is the temporary backend demo catalog, not a live store database. Prices must come from readable evidence or the shopper; there are no fabricated catalog prices.
-- Up to two products tracked simultaneously; up to twelve request comparisons per automatic reading. Large aisle prompt lists rotate in batches. This is a controlled demo target, not crowded-shelf tracking.
-- Local tracking is lightweight block matching, not SAM video tracking. A short hand-guided continuity bridge requests identity verification on turns; fast rotation, occlusion, crossing products, and blur may require automatic reacquisition or showing the front again.
-- Automatic detection waits at least 8 seconds between calls and avoids unchanged tracked scenes. Readings are serialized and changed-view gated, with retry backoff. Cloud calls still use API credits; this is not continuous cloud video inference.
-- Tracking/hand sampling targets roughly 8 Hz in workers; the browser renders video independently. Camera focus depends on device capabilities. Moving offscreen resets identity and evidence.
-- MediaPipe 0.10.32 and its hand model are served locally (about 30 MB of assets, browser-cached). No third-party CDN is required on the phone. Gesture initialization failure leaves scanning available and reports the limitation.
-- No 60fps inference promise: the phone renders independently while cloud calls take seconds. Live smoke timings are below.
-- Trips/contracts live in one backend process. Browser refresh retains the current trip in sessionStorage; a backend restart expires it. Preferences and finished-run scores persist in ignored `backend/data/`. Use one worker until a database replaces these stores.
-- Authentication and multi-household isolation are not part of this hackathon MVP. Run a controlled demo; this is not a production public service.
-- USD only. Shared costs divide among parsed chat participants, shown on the split screen. Exact-match score is verified exact matches / all requests; manual overrides/substitutions/skips are not falsely scored as exact matches.
-- Backboard network behavior and the Samsung camera must be tested with your credentials/device. Local memory works without Backboard.
-
 ## Verification
 
 ```powershell
