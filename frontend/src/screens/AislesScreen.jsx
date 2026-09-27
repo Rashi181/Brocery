@@ -33,7 +33,10 @@ export default function AislesScreen() {
       </p>
 
       <div className="row" style={{ justifyContent: "space-between", marginTop: 22, marginBottom: 14 }}>
-        <h1 style={{ margin: 0 }}>Your aisle route</h1>
+        <h1 style={{ margin: 0 }}>
+          Your aisle
+          <span className="h1-accent">route</span>
+        </h1>
         <span className="muted" style={{ fontSize: "0.85rem" }}>
           {remainingCount} left
         </span>
@@ -109,7 +112,7 @@ export default function AislesScreen() {
       </div>
 
       <div className="dock">
-        <button onClick={() => nav("/cart")} className="primary" style={{ width: "100%" }}>
+        <button onClick={() => nav("/cart")} className="primary cta block">
           Review basket
         </button>
       </div>

@@ -35,7 +35,10 @@ export default function ReviewScreen() {
   return (
     <main className="page pb-64">
       <p className="eyebrow">Review the requests</p>
-      <h1>{items.length} things. One good run.</h1>
+      <h1>
+        {items.length} things.
+        <span className="h1-accent">One good run.</span>
+      </h1>
       <p className="muted">
         Check what everyone meant before heading into the aisle. All amounts are
         USD.
@@ -208,7 +211,7 @@ export default function ReviewScreen() {
             />
           </label>
           <button
-            className="primary grow"
+            className="primary grow cta"
             disabled={
               loading ||
               !reviewed ||
@@ -218,7 +221,7 @@ export default function ReviewScreen() {
             }
             onClick={start}
           >
-            {loading ? "Preparing your route…" : "Start shopping →"}
+            {loading ? "Preparing your route…" : "Start shopping"}
           </button>
         </div>
       </footer>

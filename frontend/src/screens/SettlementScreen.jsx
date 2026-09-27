@@ -86,7 +86,10 @@ export default function SettlementScreen() {
       <p className="eyebrow" style={{ marginTop: 22 }}>
         Back to the household
       </p>
-      <h1>A good run, shared.</h1>
+      <h1>
+        A good run,
+        <span className="h1-accent">shared.</span>
+      </h1>
       {error && (
         <p className="error" role="alert">
           {error}
@@ -128,7 +131,7 @@ export default function SettlementScreen() {
             </small>
           </section>
           <button
-            className="primary w-full mt-4"
+            className="primary cta block mt-4"
             disabled={data.finished || finishing}
             onClick={finish}
           >

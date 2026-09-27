@@ -36,7 +36,10 @@ export default function CartScreen() {
       <p className="eyebrow" style={{ marginTop: 22 }}>
         The basket
       </p>
-      <h1>Everyone accounted for.</h1>
+      <h1>
+        Everyone
+        <span className="h1-accent">accounted for.</span>
+      </h1>
       <BudgetBar />
       <div className="stack mt-6">
         {lines.map((l) => (
@@ -78,8 +81,7 @@ export default function CartScreen() {
       )}
       <footer className="dock">
         <button
-          className="primary"
-          style={{ width: "100%" }}
+          className="primary cta block"
           onClick={() => nav("/settle")}
         >
           Review household split
