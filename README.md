@@ -63,7 +63,7 @@ flowchart TD
     J --> K[Checkout summary]
 
 
-    .
+.
 ├── backend/                         # FastAPI API, trips, cart, checkout, vision routes
 │   ├── main.py                      # Main API and shopping workflow
 │   ├── live.py                      # Live product observation flow
