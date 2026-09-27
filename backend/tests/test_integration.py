@@ -176,6 +176,30 @@ def test_shared_split_reconciles_every_cent_across_all_members():
     assert data["total"] == 4.01 and data["accuracy"] == 0
 
 
+def test_local_catalog_and_trip_summary_keep_aisle_and_review_history():
+    trip = begin()
+    line = main.TRIPS[trip]["lines"]["i1"]
+    assert line["aisle"] == "Snacks & Candy" and line["aisle_no"] == 2
+    assert line["catalog_matches"][0]["name"] == "Cheetos Crunchy"
+    main.TRIPS[trip]["considered"]["i1"] = [
+        {
+            "timestamp": "2026-09-27T12:00:00+00:00",
+            "analysis_id": "a1",
+            "product_name": "Cheetos Crunchy",
+            "match": False,
+            "decision": "review",
+            "price": 2.99,
+            "checklist": [],
+            "alternative": None,
+        }
+    ]
+    data = client.get("/api/settlement", params={"trip_id": trip}).json()
+    assert data["by_aisle"] == [
+        {"aisle_no": 2, "aisle": "Snacks & Candy", "items": 1, "reviews": 1}
+    ]
+    assert data["considerations"][0]["attempts"][0]["product_name"] == "Cheetos Crunchy"
+
+
 def test_live_detector_request_is_trip_scoped_and_invalid_image_rejected():
     trip = begin()
     r = client.post(

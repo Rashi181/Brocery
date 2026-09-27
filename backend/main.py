@@ -4,9 +4,11 @@ Single-process MVP; contracts/trips are in memory, preferences persist locally.
 
 import os
 import json
+import re
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
 from dotenv import load_dotenv
@@ -27,6 +29,7 @@ from intelligence.analyze import analyze_product
 from intelligence.vision import image_size, VisionError
 from intelligence.errors import install_error_handlers
 from intelligence.config import settings
+from catalog import CATALOG
 
 app = FastAPI(title="AccessCart MVP", version="1.0")
 install_error_handlers(app)
@@ -34,14 +37,44 @@ TRIPS = {}
 SCANS = {}
 ANALYSES = {}
 
-# Supi's temporary catalog; category mapping is explicitly a demo store layout.
-CATALOG = [
-    (2, "Beverages", ["bottle", "water", "milk", "coffee", "juice"]),
-    (3, "Snacks", ["cheetos", "chips", "oreo", "cracker", "snack", "pasta"]),
-    (4, "Produce", ["banana", "apple", "fruit", "vegetable"]),
-    (5, "Toys", ["lego", "duck", "toy"]),
-    (6, "Household", ["soap", "detergent", "tissue"]),
-]
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def catalog_matches(requested: str):
+    """Rank catalog rows by explicit name/tag overlap without an LLM call."""
+    query = requested.casefold().strip()
+    words = set(re.findall(r"[a-z0-9]+", query))
+    ranked = []
+    for row in CATALOG:
+        phrases = [row["name"], *row["tags"]]
+        score = 0
+        for phrase in phrases:
+            candidate = phrase.casefold()
+            if candidate == query:
+                score = max(score, 100)
+            elif candidate in query or query in candidate:
+                score = max(score, 50 + len(candidate.split()))
+            else:
+                score = max(score, len(words & set(re.findall(r"[a-z0-9]+", candidate))))
+        if score:
+            ranked.append((score, row))
+    return [row for _, row in sorted(ranked, key=lambda pair: (-pair[0], pair[1]["name"]))]
+
+
+def aisle_for(requested: str):
+    matches = catalog_matches(requested)
+    if not matches:
+        return {"aisle_no": 9, "aisle": "Other", "catalog_matches": []}
+    best = matches[0]
+    return {
+        "aisle_no": best["aisle_no"],
+        "aisle": best["aisle"],
+        "catalog_matches": [
+            {"name": row["name"], "price": row["price"]} for row in matches[:3]
+        ],
+    }
 
 
 def cents(value):
@@ -74,6 +107,25 @@ def cart(trip):
         "over_budget": spent > trip["budget_cents"],
         "lines": list(trip["lines"].values()),
     }
+
+
+def record_consideration(trip_id, item_id, result):
+    """Keep a compact, image-free review history for this in-memory trip."""
+    trip = trip_for(trip_id)
+    history = trip["considered"].setdefault(item_id, [])
+    history.append(
+        {
+            "timestamp": now_iso(),
+            "analysis_id": result.analysis_id,
+            "product_name": result.product_name,
+            "match": result.match,
+            "decision": result.decision,
+            "price": result.price,
+            "checklist": [check.model_dump() for check in result.checklist],
+            "alternative": result.alternative.model_dump() if result.alternative else None,
+        }
+    )
+    del history[:-8]
 
 
 @app.get("/api/health")
@@ -140,29 +192,37 @@ def start(body: Start):
     )
     store.put_contract(contract)
     id = "t_" + uuid.uuid4().hex
+    lines = {}
+    for item in items:
+        location = aisle_for(item.item)
+        lines[item.id] = {
+            "item_id": item.id,
+            "requested": item.item,
+            "requester": item.requester,
+            "shared": item.shared,
+            "quantity": item.quantity,
+            "status": "pending",
+            "product_name": None,
+            "price": None,
+            "amount_cents": 0,
+            "reason": "",
+            "verified": False,
+            "aisle": location["aisle"],
+            "aisle_no": location["aisle_no"],
+            "catalog_matches": location["catalog_matches"],
+            "checklist": [],
+            "updated_at": now_iso(),
+        }
     TRIPS[id] = {
         "id": id,
         "contract_id": contract.contract_id,
         "items": [i.model_copy(deep=True) for i in items],
         "runner": body.runner.strip(),
+        "started_at": now_iso(),
         "participants": contract.participants,
         "budget_cents": cents(body.budget),
-        "lines": {
-            i.id: {
-                "item_id": i.id,
-                "requested": i.item,
-                "requester": i.requester,
-                "shared": i.shared,
-                "quantity": i.quantity,
-                "status": "pending",
-                "product_name": None,
-                "price": None,
-                "amount_cents": 0,
-                "reason": "",
-                "verified": False,
-            }
-            for i in items
-        },
+        "lines": lines,
+        "considered": {},
     }
     return {"trip_id": id, "budget": body.budget}
 
@@ -174,19 +234,12 @@ def aisles(contract_id: str):
         raise HTTPException(404, "Contract not found")
     groups = {}
     for item in to_spec_response(contract).items:
-        number, name = next(
-            (
-                (n, name)
-                for n, name, words in CATALOG
-                if any(w in item.item.lower() for w in words)
-            ),
-            (9, "Other"),
-        )
-        item.aisle, item.aisle_no = name, number
-        groups.setdefault(number, {"aisle_no": number, "aisle": name, "items": []})[
+        location = aisle_for(item.item)
+        item.aisle, item.aisle_no = location["aisle"], location["aisle_no"]
+        groups.setdefault(item.aisle_no, {"aisle_no": item.aisle_no, "aisle": item.aisle, "items": []})[
             "items"
         ].append(item)
-    return {"aisles": [groups[k] for k in sorted(groups)], "catalog": "demo"}
+    return {"aisles": [groups[k] for k in sorted(groups)], "catalog": "local"}
 
 
 class Scan(BaseModel):
@@ -248,6 +301,7 @@ async def analyze(body: AnalyzeRequest):
     ANALYSES[result.analysis_id] = (body.trip_id, body.item_id, result)
     if len(ANALYSES) > 200:
         ANALYSES.pop(next(iter(ANALYSES)))
+    record_consideration(body.trip_id, body.item_id, result)
     return result
 
 
@@ -304,6 +358,7 @@ async def update_line(body, status):
             and body.product_name.strip() == result.product_name.strip()
         ),
         "checklist": [c.model_dump() for c in result.checklist] if result else [],
+        "updated_at": now_iso(),
     }
     # Retry-safe: setting this line replaces it; it never adds the amount twice.
     trip["lines"][item.id] = line
@@ -353,6 +408,7 @@ def undo(body: Undo):
         price=None,
         verified=False,
         reason="",
+        updated_at=now_iso(),
     )
     return cart(trip)
 
@@ -379,16 +435,55 @@ def settlement(trip_id: str):
             totals[line["requester"]] += line["amount_cents"]
     lines = list(trip["lines"].values())
     exact = sum(l["verified"] and l["status"] == "purchased" for l in lines)
+    outcomes = {
+        "exact": exact,
+        "substituted": sum(l["status"] == "substituted" for l in lines),
+        "skipped": sum(l["status"] == "skipped" for l in lines),
+        "pending": sum(l["status"] == "pending" for l in lines),
+    }
+    by_person = {}
+    by_aisle = {}
+    considerations = []
+    for line in lines:
+        person = by_person.setdefault(
+            line["requester"], {"requester": line["requester"], "items": [], "exact": 0}
+        )
+        person["items"].append(
+            {key: line[key] for key in ("requested", "status", "product_name", "price", "reason")}
+        )
+        person["exact"] += int(line["verified"] and line["status"] == "purchased")
+        aisle = by_aisle.setdefault(
+            line["aisle_no"],
+            {"aisle_no": line["aisle_no"], "aisle": line["aisle"], "items": 0, "reviews": 0},
+        )
+        aisle["items"] += 1
+        history = trip["considered"].get(line["item_id"], [])
+        aisle["reviews"] += len(history)
+        if history:
+            considerations.append(
+                {
+                    "requested": line["requested"],
+                    "requester": line["requester"],
+                    "aisle": line["aisle"],
+                    "attempts": history,
+                }
+            )
     return {
         "runner": trip["runner"],
+        "started_at": trip["started_at"],
+        "finished_at": trip.get("finished_at"),
         "finished": trip.get("finished", False),
         "total": sum(totals.values()) / 100,
         "members": [{"name": p, "amount": n / 100} for p, n in totals.items()],
         "accuracy": round(100 * exact / len(lines)) if lines else 0,
         "verified": exact,
         "requested": len(lines),
-        "pending": sum(l["status"] == "pending" for l in lines),
+        "pending": outcomes["pending"],
         "lines": lines,
+        "outcomes": outcomes,
+        "by_person": list(by_person.values()),
+        "by_aisle": [by_aisle[key] for key in sorted(by_aisle)],
+        "considerations": considerations,
         "score_rule": "Verified exact matches / all requested items; overrides, substitutions and skips earn no exact-match credit.",
     }
 
@@ -420,6 +515,9 @@ class Finish(BaseModel):
 @app.post("/api/trip/finish")
 def finish(body: Finish):
     trip = trip_for(body.trip_id)
+    if not trip.get("finished"):
+        trip["finished"] = True
+        trip["finished_at"] = now_iso()
     summary = settlement(body.trip_id)
     history = read_runs()
     if not any(r["trip_id"] == body.trip_id for r in history):
@@ -435,7 +533,6 @@ def finish(body: Finish):
         temp = HISTORY_PATH.with_suffix(".tmp")
         temp.write_text(json.dumps(history[-500:]), encoding="utf-8")
         temp.replace(HISTORY_PATH)
-    trip["finished"] = True
     return settlement(body.trip_id)
 
 
@@ -465,4 +562,11 @@ def leaderboard():
 
 
 from live import install_live
-install_live(app, member_item=member_item, get_llm=get_llm, get_store=get_store, analyses=ANALYSES)
+install_live(
+    app,
+    member_item=member_item,
+    get_llm=get_llm,
+    get_store=get_store,
+    analyses=ANALYSES,
+    record_consideration=record_consideration,
+)

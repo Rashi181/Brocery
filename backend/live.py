@@ -74,7 +74,7 @@ the product is verified as the same. Missing views must remain unknown.
 """
 
 
-def install_live(app, *, member_item, get_llm, get_store, analyses):
+def install_live(app, *, member_item, get_llm, get_store, analyses, record_consideration):
     inflight = set()
     identifying = set()
 
@@ -167,6 +167,7 @@ def install_live(app, *, member_item, get_llm, get_store, analyses):
             result = finalize_analysis(item, out, observed_price=None, degraded=uncertain or item.id not in supplied)
             result.analysis_id = uuid.uuid4().hex
             analyses[result.analysis_id] = (body.trip_id, item.id, result)
+            record_consideration(body.trip_id, item.id, result)
             identity = next((c.status for c in out.checks if c.criterion.lower().strip() == "product identity"), "unknown")
             results.append({"item_id": item.id, "identity": identity, "result": result.model_dump()})
         while len(analyses) > 200:

@@ -17,6 +17,7 @@ def test_live_analysis_is_recorded_for_cart():
     assert data['assessments'][0]['identity'] == 'pass'
     key = data['assessments'][0]['result']['analysis_id']
     assert main.ANALYSES[key][:2] == (trip, 'i1')
+    assert main.TRIPS[trip]['considered']['i1'][0]['analysis_id'] == key
 
 
 def test_live_rejects_wrong_trip_item_and_invalid_photo():

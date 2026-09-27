@@ -61,6 +61,11 @@ export default function SettlementScreen() {
       ),
       "",
       `Exact-match coverage: ${data.accuracy}% (${data.verified}/${data.requested})`,
+      `Substitutions: ${data.outcomes.substituted} · Skipped: ${data.outcomes.skipped}`,
+      ...data.considerations.flatMap((c) => [
+        `${c.requested} for ${c.requester} · ${c.attempts.length} product review${c.attempts.length === 1 ? "" : "s"}`,
+        ...c.attempts.map((a) => `  ${a.product_name}: ${a.decision}`),
+      ]),
       "No payment collected.",
     ].join("\n");
   }
@@ -124,6 +129,32 @@ export default function SettlementScreen() {
             <small>
               {data.verified} verified matches / {data.requested} requests
             </small>
+          </section>
+          <section className="panel mt-4">
+            <div className="eyebrow">WHAT HAPPENED IN STORE</div>
+            <p className="muted">
+              {data.outcomes.exact} exact · {data.outcomes.substituted} substituted ·{" "}
+              {data.outcomes.skipped} skipped
+            </p>
+            {data.by_aisle.map((aisle) => (
+              <div className="split-row" key={aisle.aisle_no}>
+                <span>
+                  Aisle {aisle.aisle_no} · {aisle.aisle}
+                </span>
+                <strong>{aisle.reviews} reviews</strong>
+              </div>
+            ))}
+            {data.considerations.map((item) => (
+              <div className="quote mt-3" key={item.requested + item.requester}>
+                <strong>{item.requested}</strong> for {item.requester} · considered{" "}
+                {item.attempts.length} time{item.attempts.length === 1 ? "" : "s"}
+                {item.attempts.map((attempt) => (
+                  <div key={attempt.analysis_id}>
+                    {attempt.product_name} — {attempt.decision}
+                  </div>
+                ))}
+              </div>
+            ))}
           </section>
           <button
             className="primary w-full mt-4"
