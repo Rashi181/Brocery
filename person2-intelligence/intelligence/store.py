@@ -26,6 +26,7 @@ import uuid
 
 from .schemas import Contract, ContractItem, Detection
 
+_chat_cache: dict[str, Contract] = {}
 _contracts: dict[str, Contract] = {}
 _items: dict[str, ContractItem] = {}
 _last_detections: tuple[float, list[Detection]] = (0.0, [])
@@ -66,9 +67,20 @@ def recent_detections() -> list[Detection]:
     return detections
 
 
+def get_cached_chat(key):
+    return _chat_cache.get(key)
+
+
+def cache_chat(key, contract):
+    _chat_cache[key] = contract
+    while len(_chat_cache) > 32:
+        _chat_cache.pop(next(iter(_chat_cache)))
+
+
 def reset() -> None:
     """For tests: clear everything between test cases."""
     global _last_detections
+    _chat_cache.clear()
     _contracts.clear()
     _items.clear()
     _last_detections = (0.0, [])

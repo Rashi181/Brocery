@@ -131,6 +131,9 @@ class BackboardPreferenceStore:
         if await self.mirror.has(fact):  # don't spam Backboard with duplicates
             return fact
         await self.mirror.add(fact)
+        return await self.sync_fact(fact)
+
+    async def sync_fact(self, fact: PreferenceFact) -> PreferenceFact:
         try:
             await self.client.add_memory(
                 self.assistant_id,

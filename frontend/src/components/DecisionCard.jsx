@@ -182,7 +182,7 @@ export default function DecisionCard({
       )}
       <div className="row">
         <button
-          className="primary grow"
+          className="primary grow shop-add"
           disabled={
             busy ||
             !accepted ||

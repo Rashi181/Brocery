@@ -14,9 +14,10 @@ Endpoints Person 2 owns per the spec: /chat/parse, /vision/detect,
 from __future__ import annotations
 
 import logging
+import os
 import time
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 
 from .analyze import analyze_product
 from .config import settings
@@ -56,6 +57,14 @@ def get_llm():
     return _llm
 
 
+def get_chat_llm():
+    provider = os.getenv("CHAT_PROVIDER", "auto").lower()
+    if settings.llm_mode == "live" and (provider == "gemini" or (provider == "auto" and os.getenv("GEMINI_API_KEY"))):
+        from .gemini_chat import GeminiChat
+        return GeminiChat()
+    return get_llm()
+
+
 def get_store() -> PreferenceStore:
     global _pref_store
     if _pref_store is None:
@@ -88,11 +97,11 @@ async def health():
 
 @router.post("/chat/parse", response_model=ChatParseResponse)
 async def chat_parse(
-    body: ChatParseRequest, llm=Depends(get_llm), store=Depends(get_store)
+    body: ChatParseRequest, background_tasks: BackgroundTasks, llm=Depends(get_chat_llm), store=Depends(get_store)
 ):
     t0 = time.perf_counter()
     try:
-        contract = await parse_chat(body.raw_text, llm=llm, store_=store)
+        contract = await parse_chat(body.raw_text, llm=llm, store_=store, background_tasks=background_tasks)
     except ChatParseError as e:
         raise AppError(422, str(e), "CHAT_NOT_PARSEABLE")
     except ContractError as e:

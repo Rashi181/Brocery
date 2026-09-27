@@ -10,6 +10,8 @@ people, cite messages that don't exist, or return the same item twice.
 
 from __future__ import annotations
 
+import hashlib
+import asyncio
 import re
 from typing import Optional
 
@@ -177,30 +179,50 @@ def to_spec_response(contract: Contract) -> ChatParseResponse:
 
 
 async def parse_chat(
-    raw_text: str, *, llm, store_: PreferenceStore, window_days: Optional[int] = None
+    raw_text: str, *, llm, store_: PreferenceStore, window_days: Optional[int] = None, background_tasks=None
 ) -> Contract:
+    # An export is often uploaded twice while the runner checks the draft.
+    # Reuse the already-validated in-process contract instead of paying for a
+    # second Muse call. Include the window setting because it changes input.
+    cache_key = hashlib.sha256(
+        f"window={window_days!r}\0{raw_text}".encode("utf-8")
+    ).hexdigest()
+    cached = store.get_cached_chat(cache_key)
+    if cached is not None:
+        return cached
+
     messages = recent_window(parse_whatsapp(raw_text), window_days)
     people = get_participants(messages)
     if not people:
         raise ContractError("Chat has no messages from people (only system lines).")
 
-    known = {p: [f.fact for f in await store_.for_person(p, limit=6)] for p in people}
+    # Keep the full recent transcript for evidence validation and reviewer
+    # display, but send the model all human messages. Do not
+    # query Backboard here: that used to add one serial network round-trip per
+    # chat participant before Muse could start. Product analysis reads the
+    # same preference store later, for the actual requester and item.
+    relevant_messages = [m for m in messages if not m.is_system]
     raw = await llm.json_call(
         task="parse_chat",
         system=prompts.PARSE_CHAT_SYSTEM,
-        text=prompts.parse_chat_user(render_for_llm(messages), people, known),
+        text=prompts.parse_chat_user(render_for_llm(relevant_messages), people, {}),
         out_model=LLMContract,
-        context={"messages": messages},
+        context={"messages": relevant_messages},
     )
     contract = clean_contract(raw, messages, store.new_contract_id())
     store.put_contract(contract)
 
     from .preferences import PreferenceFact
 
-    for p in contract.preferences_learned:
-        await store_.add(
-            PreferenceFact(
-                requester=p.requester, fact=p.fact, kind=p.kind, source="chat"
-            )
-        )
+    facts = [PreferenceFact(requester=p.requester, fact=p.fact, kind=p.kind, source="chat")
+             for p in contract.preferences_learned]
+    mirror = getattr(store_, "mirror", None)
+    if background_tasks is not None and mirror is not None:
+        new_facts = [f for f in facts if not await mirror.has(f)]
+        await asyncio.gather(*(mirror.add(f) for f in new_facts))
+        for fact in new_facts:
+            background_tasks.add_task(store_.sync_fact, fact)
+    else:
+        await asyncio.gather(*(store_.add(f) for f in facts))
+    store.cache_chat(cache_key, contract)
     return contract

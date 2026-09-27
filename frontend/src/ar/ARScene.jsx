@@ -10,20 +10,25 @@ function label(detection, requester) {
   canvas.width = 768;
   canvas.height = 256;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "rgba(12,22,22,.92)";
+  ctx.fillStyle = "rgba(250,247,235,.97)";
   ctx.beginPath();
   ctx.roundRect(0, 0, 768, 256, 28);
   ctx.fill();
-  ctx.fillStyle = "#6ee7b7";
-  ctx.fillRect(0, 28, 9, 200);
-  ctx.font = "bold 48px sans-serif";
-  ctx.fillText((detection.name || detection.prompt).slice(0, 36), 30, 76, 708);
-  ctx.fillStyle = "#f3f8f6";
-  ctx.font = "32px sans-serif";
-  ctx.fillText(requester, 30, 136, 708);
-  ctx.fillStyle = "#b6cac2";
-  ctx.font = "26px sans-serif";
-  ctx.fillText(detection.subtitle || "Candidate · double-tap to inspect", 30, 200, 708);
+  ctx.strokeStyle = "#b9cbb6"; ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = "#275a42";
+  ctx.font = "600 19px Arial, sans-serif";
+  ctx.fillText("ACCESSCART  /  YOUR DAILY FINDS", 32, 36);
+  const title=detection.name || detection.prompt;
+  let fontSize=46;
+  do {ctx.font=`bold ${fontSize}px Georgia, serif`;fontSize--;} while(ctx.measureText(title).width>698 && fontSize>25);
+  ctx.fillText(title,32,96,698);
+  ctx.fillStyle = "#526458";
+  ctx.font = "26px Arial, sans-serif";
+  ctx.fillText(requester ? `Picked for ${requester}` : "From your shopping list",32,140,698);
+  ctx.fillStyle="#1e4935";ctx.beginPath();ctx.roundRect(24,168,720,66,22);ctx.fill();
+  ctx.fillStyle="#f4f7e8";ctx.font="600 25px Arial, sans-serif";
+  ctx.fillText(detection.subtitle || "Double-tap to inspect",46,211,665);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(
@@ -72,6 +77,7 @@ export default function ARScene({
       end: () => engine.current?.end(),
       clear: () => engine.current?.clear(),
       remove: (prompt) => engine.current?.remove(prompt),
+      retainItems: (ids) => engine.current?.retainItems(ids),
     }),
     [],
   );
@@ -135,6 +141,17 @@ export default function ARScene({
       }
     }
     const controls = {
+      retainItems(ids) {
+        if(!callbacks.current?.automatic) return;
+        const wanted=new Set(ids);
+        const keep=(d)=>d.matched_item_ids?.some((id)=>wanted.has(id));
+        pending.filter((p)=>!keep(p.d)).forEach((p)=>p.source.cancel());
+        pending=pending.filter((p)=>keep(p.d));
+        anchors.filter((a)=>!keep(a.object.children[0].userData.detection)).forEach((a)=>{
+          a.anchor.delete();scene.remove(a.object);disposeObject(a.object);
+        });
+        anchors=anchors.filter((a)=>keep(a.object.children[0].userData.detection));
+      },
       async start() {
         try {
           if (
@@ -186,7 +203,7 @@ export default function ARScene({
           }
           setActive(true);
           callbacks.current?.onActive(true);
-          nextCapture = performance.now() + 1200;
+          nextCapture = performance.now() + 400;
           setStatus("Move slowly to map the shelf. Recognition runs automatically.");
         } catch (e) {
           setStatus(e.message);
@@ -318,12 +335,15 @@ export default function ARScene({
               };
               captureBusy = true;
               const captureSession = captured.session;
+              let retryDelay = 800;
               Promise.resolve(callbacks.current?.onCapture(
                 cameraPixelsToJpeg(pixels, width, height), captured,
-              )).catch(() => {}).finally(() => {
+              )).then((result) => {
+                if (result?.retryDelay) retryDelay = result.retryDelay;
+              }).catch(() => { retryDelay = 5000; }).finally(() => {
                 if (renderer.xr.getSession() === captureSession) {
                   captureBusy = false;
-                  nextCapture = performance.now() + 3500;
+                  nextCapture = performance.now() + retryDelay;
                 }
               });
               setStatus("Recognising aisle products · existing labels stay anchored");

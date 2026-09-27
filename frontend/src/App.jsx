@@ -7,6 +7,7 @@ const ARScreen = lazy(() => import("./screens/ARScreen"));
 const LegacyARScreen = lazy(() => import("./screens/LegacyARScreen"));
 const AnchoredShoppingScreen = lazy(() => import("./screens/AnchoredShoppingScreen"));
 import CartScreen from "./screens/CartScreen";
+import CheckoutScreen from "./screens/CheckoutScreen";
 import SettlementScreen from "./screens/SettlementScreen";
 import { api } from "./api";
 export default function App() {
@@ -58,6 +59,7 @@ export default function App() {
           }
         />
         <Route path="/cart" element={<CartScreen />} />
+        <Route path="/checkout" element={<CheckoutScreen />} />
         <Route path="/settle" element={<SettlementScreen />} />
         <Route path="*" element={<ImportScreen />} />
       </Routes>

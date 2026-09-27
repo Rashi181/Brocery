@@ -33,8 +33,13 @@ export default function CartScreen() {
   return (
     <main className="page pb-32">
       <button onClick={() => nav("/aisles")}>← Your route</button>
-      <div className="eyebrow mt-6">03 / THE BASKET</div>
-      <h1>Everyone accounted for.</h1>
+      <p className="eyebrow" style={{ marginTop: 22 }}>
+        The basket
+      </p>
+      <h1>
+        Everyone
+        <span className="h1-accent">accounted for.</span>
+      </h1>
       <BudgetBar />
       <div className="stack mt-6">
         {lines.map((l) => (
@@ -48,6 +53,7 @@ export default function CartScreen() {
               {l.shared ? "Shared household item" : l.requester}
             </p>
             {l.price != null && <h2>${l.price.toFixed(2)}</h2>}
+            {l.price_source && <small className="muted">{l.price_source} · not a store price</small>}
             {l.reason && <p className="quote">{l.reason}</p>}
             {l.status !== "pending" ? (
               <button disabled={busy} onClick={() => undo(l.item_id)}>
@@ -75,8 +81,11 @@ export default function CartScreen() {
         </p>
       )}
       <footer className="dock">
-        <button className="primary w-full" onClick={() => nav("/settle")}>
-          Review household split →
+        <button
+          className="primary cta block"
+          onClick={() => nav("/checkout")}
+        >
+          Checkout →
         </button>
         <small className="muted">
           Shopping summary only. No payment is collected.

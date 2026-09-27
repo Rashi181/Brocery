@@ -295,6 +295,9 @@ async def update_line(body, status):
         "status": status,
         "product_name": body.product_name if status != "skipped" else None,
         "price": body.price if status != "skipped" else None,
+        "unit_price": body.unit_price if status != "skipped" else None,
+        "price_source": None,
+        "purchased_quantity": None,
         "amount_cents": cents(body.price) if status != "skipped" else 0,
         "reason": body.reason,
         "verified": bool(
@@ -466,3 +469,35 @@ def leaderboard():
 
 from live import install_live
 install_live(app, member_item=member_item, get_llm=get_llm, get_store=get_store, analyses=ANALYSES)
+
+
+class DemoAdd(BaseModel):
+    trip_id: str
+    item_id: str
+    quote_id: str
+    quantity: int = Field(ge=1, le=100)
+    acknowledge_unverified: bool = False
+
+
+@app.post("/api/item/demo-add")
+def demo_add(body: DemoAdd):
+    from demo_prices import get_quote
+    trip, item = member_item(body.trip_id, body.item_id)
+    if trip.get("finished"):
+        raise HTTPException(409, "This trip is complete")
+    quote = get_quote(body.quote_id, body.trip_id, body.item_id)
+    if not quote:
+        raise HTTPException(409, "Product price expired. Show the product to the camera again.")
+    if not body.acknowledge_unverified:
+        raise HTTPException(409, "Confirm the demo price and unverified requirements before adding")
+    line = trip["lines"][item.id]
+    if line["status"] != "pending":
+        return cart(trip)  # duplicate taps cannot increase the total
+    line.update(status="purchased", product_name=quote["name"],
+                price=quote["unit_cents"] * body.quantity / 100,
+                amount_cents=quote["unit_cents"] * body.quantity,
+                unit_price=quote["unit_cents"] / 100, purchased_quantity=body.quantity,
+                price_source="Gemini demo estimate", verified=False,
+                reason="Shopper added using a fictional demo price; requirements unverified",
+                checklist=[{"text": value, "status": "warn"} for value in [*item.spec, *item.avoid]])
+    return cart(trip)

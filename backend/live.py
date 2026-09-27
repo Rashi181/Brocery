@@ -36,6 +36,10 @@ class ItemReading(BaseModel):
     analysis: LLMAnalysis
 
 
+class SceneRequest(LiveRequest):
+    item_ids: list[str] = Field(min_length=1, max_length=100)
+
+
 class LiveReading(BaseModel):
     product_name: str
     visible_text: str
@@ -79,7 +83,7 @@ def install_live(app, *, member_item, get_llm, get_store, analyses):
     identifying = set()
 
     @app.post("/api/product/scene")
-    async def scene(body: LiveRequest):
+    async def scene(body: SceneRequest):
         from gemini_identity import identify_product
         items = [member_item(body.trip_id, id)[1] for id in dict.fromkeys(body.item_ids)]
         if member_item(body.trip_id, items[0].id)[0].get("finished"):
@@ -95,7 +99,9 @@ def install_live(app, *, member_item, get_llm, get_store, analyses):
         try:
             result = await identify_product(body.image_b64, items, scene=True)
             log.info('gemini-scene complete seconds=%.1f products=%s', time.monotonic()-started, len(result.products))
-            return {"sequence": body.sequence, **result.model_dump()}
+            from demo_prices import issue_quote
+            products = [{**p.model_dump(), "demo_quote": issue_quote(body.trip_id, p)} for p in result.products]
+            return {"sequence": body.sequence, "products": products}
         finally:
             identifying.discard(body.trip_id)
 
